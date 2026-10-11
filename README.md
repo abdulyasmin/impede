@@ -39,7 +39,7 @@ impede is a userplugin, so it needs Vencord built from source ([guide](https://d
 
 ```sh
 cd Vencord/src/userplugins
-git clone <this repo> impede
+git clone https://forgejo.causticpotato.org/abdulyasmin/impede.git impede
 cd ../..
 pnpm build
 pnpm inject   # first time only
