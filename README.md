@@ -154,8 +154,6 @@ Most surfaces are removed by webpack patches that stop the component from render
 
 A stylesheet covers the rest: CSS fallbacks for the patched surfaces, using routing and test attributes (`href`, `data-testid`, `data-settings-sidebar-item`) that survived Discord's class-name changes in 2023 and 2025, and small inline upsells that have no stable code anchor. Those use `[class*="name_"]` selectors, which match both of Discord's current class shapes (`name_abc123`, `name__0abcd`). Each prefix was checked against all CSS in Discord build 634304: each matches only upsell classes, except `notice_`, which is only used together with `colorPremium`.
 
-The research behind these choices, with sources, is in [reports/Hiding Discord upsells in Vencord.md](reports/Hiding%20Discord%20upsells%20in%20Vencord.md).
-
 ## Maintenance
 
 Expect a patch regex to break somewhere most months; the gift button and DM-list rows break most often. Vencord's reporter loads logged-out discord.com in headless Chrome and lists every patch that no longer matches:
