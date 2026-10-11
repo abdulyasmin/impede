@@ -8,35 +8,102 @@ The repository lives on [Forgejo](https://forgejo.causticpotato.org/abdulyasmin/
 
 The plugin stops upsells from rendering at all. They never report "viewed" analytics, a hidden promo notice does not hold back a payment warning, and lists close up around removed rows. Each item has its own toggle, and Vencord's reporter lists the patches a Discord update has broken. It needs Vencord built from source.
 
-The theme hides the same things with CSS. It needs no build and loads in any client mod that takes CSS themes: Vencord, Vesktop, Equicord and BetterDiscord. Everything is hidden by default, and hidden elements still load and report analytics; see [Theme limitations](#theme-limitations).
+The theme hides the same things with CSS. It needs no build and loads in any client mod that takes CSS themes: Vencord, Vesktop, Equicord, Equibop and BetterDiscord. Everything is hidden by default, and hidden elements still load and report analytics; see [Theme limitations](#theme-limitations).
 
 With both installed, the theme hides everything whatever the plugin's settings say, so turning a plugin setting off has no visible effect.
 
 ## Install
 
+`install.sh` (macOS and Linux) and `install.ps1` (Windows) install either form, and running them again updates it. The steps they automate are written out below each.
+
 ### Plugin
 
-impede is a userplugin, so it needs Vencord built from source ([guide](https://docs.vencord.dev/installing/)).
+You need git and Node.js 22 or newer. On Windows, `winget install Git.Git OpenJS.NodeJS.LTS` installs both; on macOS, `xcode-select --install` provides git and [nodejs.org](https://nodejs.org/en/download) or Homebrew provides Node; on Linux, use your package manager. pnpm is optional: when it is missing, the script runs the version Vencord pins through npx.
+
+On macOS or Linux:
 
 ```sh
-cd Vencord/src/userplugins
-git clone https://forgejo.causticpotato.org/abdulyasmin/impede.git impede
-cd ../..
-pnpm build
-pnpm inject   # first time only
+curl -fsSLO https://raw.githubusercontent.com/abdulyasmin/impede/main/install.sh
+sh install.sh plugin
 ```
 
-Restart Discord and enable **Impede** in Settings → Vencord → Plugins. The cog next to it opens the settings listed under [What it hides](#what-it-hides). Clone the repo into `src/userplugins` rather than symlinking it there: esbuild follows the link to the real path, which has no `tsconfig.json`, and the `@api/...` imports fail to resolve.
+On Windows, in PowerShell:
 
-To update, run `git pull` in `src/userplugins/impede` and `pnpm build` in the Vencord folder, then restart Discord.
+```powershell
+iwr https://raw.githubusercontent.com/abdulyasmin/impede/main/install.ps1 -UseBasicParsing -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1 plugin
+```
+
+The script clones Vencord into `~/Vencord`, clones impede into its `src/userplugins` folder, builds Vencord, and starts Vencord's installer, which lists the Discord installs it found and patches the one you pick. Options, with the PowerShell spelling second:
+
+| Option | Effect |
+|---|---|
+| `--vencord-dir DIR`, `-VencordDir DIR` | Use this Vencord checkout, cloning it if missing |
+| `--discord PATH`, `-Discord PATH` | Patch this Discord install without asking |
+| `--vesktop`, `-Vesktop` | Point Vesktop at the build instead of patching Discord; quit Vesktop first |
+| `--no-inject`, `-NoInject` | Build only |
+
+Then quit Discord fully (not just its window), start it again, and enable **Impede** in Settings → Vencord → Plugins. The cog next to it opens the settings listed under [What it hides](#what-it-hides).
+
+By hand, following Vencord's [install guide](https://docs.vencord.dev/installing/), with the same commands on every system:
+
+```sh
+git clone https://github.com/Vendicated/Vencord
+cd Vencord
+pnpm install --frozen-lockfile
+git clone https://forgejo.causticpotato.org/abdulyasmin/impede.git src/userplugins/impede
+pnpm build
+pnpm inject
+```
+
+To update, run `git pull` in `Vencord` and in `src/userplugins/impede`, then `pnpm install --frozen-lockfile` and `pnpm build`, and restart Discord. Clone impede into `src/userplugins` rather than symlinking it there: esbuild follows the link to the real path, which has no `tsconfig.json`, and the `@api/...` imports fail to resolve.
+
+Patching Discord differs between systems:
+
+- Windows: the installer closes Discord before patching it. When Discord updates itself into a new `app-*` folder, Vencord copies its patch across.
+- macOS: if patching fails with "operation not permitted", allow your terminal app under System Settings → Privacy & Security → App Management and try again.
+- Linux: Discord under `/usr` or `/opt`, or installed as a system-wide Flatpak, needs root to patch, and `pnpm inject` cannot ask for it. The script offers to retry as root. By hand, after `pnpm inject` has downloaded the installer, run `sudo env VENCORD_USER_DATA_DIR="$PWD" VENCORD_DEV_INSTALL=1 dist/Installer/VencordInstallerCli-linux --install` in the Vencord folder. Vencord does not support the Snap package of Discord.
+- Vesktop, on any system: skip `pnpm inject`. In Vesktop's settings, click **Open Developer Settings** at the bottom, set **Vencord Location** to the `dist` folder in your Vencord checkout, and restart Vesktop. The Flatpak build first needs `flatpak override --user dev.vencord.Vesktop --filesystem="$HOME/Vencord"`; without it, the location becomes a temporary path that breaks after a restart.
+
+If a Discord update removes Vencord, patch it again by rerunning the script or `pnpm inject`.
 
 ### Theme
+
+On macOS or Linux, with `install.sh` downloaded as above:
+
+```sh
+sh install.sh theme
+```
+
+On Windows, with `install.ps1` downloaded as above:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 theme
+```
+
+The script copies the theme into the themes folder of each client mod it finds, including Flatpak installs on Linux. Then switch impede on in Settings → Themes.
+
+By hand:
 
 1. Download [`impede.theme.css`](https://forgejo.causticpotato.org/abdulyasmin/impede/raw/branch/main/impede.theme.css).
 2. In Vencord, Vesktop or Equicord, open Settings → Themes → Local Themes and click **Open Themes Folder**. In BetterDiscord, open Settings → Themes and click **Open Themes Folder**.
 3. Move the file into that folder and switch the theme on.
 
-Each rule in the file has a comment saying what it hides; delete a rule to keep that element. To update, download the file again over the old one. Pasting the file's contents into Vencord's QuickCSS also works. Adding the raw link under Online Themes does not: Vencord's content security policy only allows stylesheets from a few hosts, and Forgejo serves raw files as plain text, which Discord will not apply as a stylesheet.
+The themes folders are:
+
+| Client | Windows | macOS | Linux |
+|---|---|---|---|
+| Vencord | `%APPDATA%\Vencord\themes` | `~/Library/Application Support/Vencord/themes` | `~/.config/Vencord/themes` |
+| Vesktop | `%APPDATA%\vesktop\themes` | `~/Library/Application Support/vesktop/themes` | `~/.config/vesktop/themes` |
+| Equicord | `%APPDATA%\Equicord\themes` | `~/Library/Application Support/Equicord/themes` | `~/.config/Equicord/themes` |
+| Equibop | `%APPDATA%\equibop\themes` | `~/Library/Application Support/equibop/themes` | `~/.config/equibop/themes` |
+| BetterDiscord | `%APPDATA%\BetterDiscord\themes` | `~/Library/Application Support/BetterDiscord/themes` | `~/.config/BetterDiscord/themes` |
+
+With the Discord Flatpak, the Linux folders are under `~/.var/app/com.discordapp.Discord/config/` instead of `~/.config/`. The Vesktop Flatpak uses `~/.var/app/dev.vencord.Vesktop/config/vesktop/themes`.
+
+Each rule in the file has a comment saying what it hides; delete a rule to keep that element. To update, download the file again over the old one. Pasting the file's contents into Vencord's QuickCSS also works.
+
+In Vencord or Vesktop you can instead add `https://cdn.jsdelivr.net/gh/abdulyasmin/impede@main/impede.theme.css` under Settings → Themes → Online Themes. The theme then updates without a download, once jsDelivr's cache picks up the change. Forgejo and GitHub raw links do not work there: they serve the file as plain text, which Discord will not apply as a stylesheet.
 
 ## What it hides
 
