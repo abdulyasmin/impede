@@ -1,0 +1,163 @@
+/* ---------- Quests and Orbs ---------- */
+
+/* DM list: Quests row */
+li:has(> div > a[href="/quest-home"]) {
+    display: none !important;
+}
+
+/* Sponsored Quest bar above the account panel */
+div:has(> [data-testid="quest-bar-container"]) {
+    display: none !important;
+}
+
+/* The Quest bar squares off the account panel's top corners; put them back */
+[class*="containerQuestBarVisible_"]:not(
+    [class*="containerRtcOpened_"],
+    [class*="containerListenAlongVisible_"]
+) {
+    border-start-start-radius: 7px !important;
+    border-start-end-radius: 7px !important;
+}
+
+/* Discover: Quests tab, matched by its icon */
+[role="tablist"]
+    > [role="tab"]:has(
+        > [class*="navItemIcon_"] > svg > path[d^="M7.5 21.7a8.95"]
+    ) {
+    display: none !important;
+}
+
+/* Friends → Active Now: quest promo body (the "Promoted" header line has no stable hook) */
+[class*="wrapper_"]:has(> [class*="foreground_"] > [class*="ctas_"]) {
+    display: none !important;
+}
+
+/* Member list: "playing a Quest" icon */
+[class*="questsIcon_"] {
+    display: none !important;
+}
+
+/* Quest embeds in chat */
+[class*="questEmbedCard_"] {
+    display: none !important;
+}
+
+/* Orbs balance row in the account popout */
+li:has(> div > [role="button"] > [class*="orbUserStatusMenuIconWrapper_"]),
+[class*="orbUserStatusMenuIconWrapper_"] {
+    display: none !important;
+}
+
+/* ---------- Nitro and Shop ---------- */
+
+/* DM list: Nitro and Shop rows */
+li:has(> div > a[href="/store"]),
+li:has(> div > a[href="/shop"]) {
+    display: none !important;
+}
+
+/* Chat-bar gift button: the only button wrapper directly before the GIF/sticker/emoji buttons
+   without their class (Vencord's chat buttons carry it too) */
+[class*="buttons_"]
+    > div:not(.expression-picker-chat-input-button):has(
+        + .expression-picker-chat-input-button
+    ) {
+    display: none !important;
+}
+
+/* Promotional notice bars. Payment problems use colorWarning or colorDanger and are not matched.
+   The premiumIcon_ exclusion keeps "your subscription is ending" (PREMIUM_UNCANCEL) visible. */
+[class*="notice_"][class*="colorPremium"]:not(:has(> [class*="premiumIcon_"])) {
+    display: none !important;
+}
+
+/* Partner outbound promotion; build-specific hash, so this stops matching when Discord changes it */
+[class*="notice_"][class*="colorPremium"]:has(> [class*="premiumIcon__7b750"]) {
+    display: none !important;
+}
+
+/* Dark promo notices: trial and discount ending, Nitro marketing, game partner nagbars */
+[class*="notice_"]:has(> [class*="noticeContent_"]),
+[class*="notice_"]:has(> [class*="iconMetaQuest_"]) {
+    display: none !important;
+}
+
+/* Nitro-gradient coachmarks and popovers (referral, discounts, Orbs, file upload). Also hides a
+   few feature tips that share the gradient, such as the Favorites and badge-directory intros. */
+[data-mana-component="popover"]:has(> [class*="nitro-pink_"]) {
+    display: none !important;
+}
+
+/* Profile overflow menu: "Shop this look" and Nitro referral */
+#user-profile-overflow-menu-shop-this-look,
+#user-profile-overflow-menu-referral-profile-share-nitro {
+    display: none !important;
+}
+
+/* Emoji picker: Nitro-locked emoji. visibility keeps their cells so the virtualised list keeps
+   its row heights; locked emoji sort last, so they leave blank cells at the end of a section. */
+[class*="emojiListRow_"]
+    > li:has(> button[data-type="emoji"] > [class*="emojiLockIconContainer_"]) {
+    visibility: hidden !important;
+}
+
+[class*="upsellContainerFloating_"],
+[class*="upsellContainerInline_"] {
+    display: none !important;
+}
+
+/* Message too long */
+[class*="messageLengthUpsellContainer_"] {
+    display: none !important;
+}
+
+/* Nitro banners in pickers, Super Reactions, profiles and appearance settings */
+[class*="emptyGuildUpsell_"],
+[class*="nitroUpsell_"],
+[class*="upsellHeaderContainer_"],
+[class*="upsellBanner_"],
+[class*="burstReactionTooltipUpsellCta_"],
+[class*="inlineUpsell_"],
+[class*="premiumTryItOutSection_"],
+[class*="upsellOverlayContainer_"],
+[class*="premiumOfferUnackedBadge_"],
+[data-nav-anchor-key="appearance_custom_themes_upsell"],
+[class*="bannerUpsell_"],
+[class*="footerUpsellRow_"],
+aside[class*="upsellContainer_"] {
+    display: none !important;
+}
+
+/* Settings → Gift Inventory: partner promotions (gift codes stay) */
+[class*="promotionCard_"] {
+    display: none !important;
+}
+
+/* Settings → Nitro. Manage an active subscription under Settings → Subscriptions. */
+li[data-settings-sidebar-item="nitro_panel"] {
+    display: none !important;
+}
+
+/* ---------- Server Boost ---------- */
+
+/* Boost progress bar in the channel list */
+[role="button"]:has(
+    > [class*="contentContainer_"] > [class*="progressContainer_"]
+) {
+    display: none !important;
+}
+
+/* "Server Boosts" row in the channel list */
+li:has([id^="skill-trees-"]) {
+    display: none !important;
+}
+
+/* "Server Boost" in the server dropdown */
+#guild-header-popout-premium-subscribe {
+    display: none !important;
+}
+
+/* Settings → Server Boost, including boost-slot management */
+li[data-settings-sidebar-item="premium_guild_subscriptions_panel"] {
+    display: none !important;
+}
