@@ -1,3 +1,12 @@
+/**
+ * @name impede
+ * @author yasmin
+ * @description Hides Discord ads (Quests), Nitro and Shop upsells, and Server Boost prompts.
+ * @version 1.1.0
+ * @license AGPL-3.0-or-later
+ * @source https://forgejo.causticpotato.org/abdulyasmin/impede
+ */
+
 /* ---------- Quests and Orbs ---------- */
 
 /* DM list: Quests row */
@@ -128,8 +137,67 @@ aside[class*="upsellContainer_"] {
     display: none !important;
 }
 
-/* Settings → Gift Inventory: partner promotions (gift codes stay) */
-[class*="promotionCard_"] {
+/* "Get Nitro" and "Subscribe" buttons. The second selector matches buttons with the Nitro wheel
+   icon, which includes a few buttons subscribers use, such as "keep Nitro" in the cancel flow;
+   subscribers can delete it or use the plugin, which skips it for them. */
+button:has(> [class*="premiumSubscribeButton_"]),
+button[data-mana-component="button"]:has(path[d^="M16.23 12c0 1.29-.95 2.25-2.22 2.25"]) {
+    display: none !important;
+}
+
+/* Emoji, sticker and sound popouts and pickers: Get Nitro buttons, the Super Reaction tooltip
+   text, the locked-sticker card, the entrance-sound card and the Soundmoji Nitro strip */
+:is([class*="emojiSection_"], [class*="otherEmojisContainer_"]) [class*="ctaButton_"]:has(svg),
+[class*="burstReactionTooltipPrompt_"]:has([aria-label="super reaction tooltip upsell"]),
+[class*="upsellWrapper_"],
+[class*="upsellOuter_"],
+[class*="infoNitroContainer_"] {
+    display: none !important;
+}
+
+/* Profiles, the profile editor and the decoration pickers: "Reorder badges with Nitro", Shop
+   and try-it-out banners, Nitro-only sections, the display-name styles footer, and the
+   wishlist card in the profile popout */
+[class*="contentWithUpsell_"] > [class*="nitro-pink_"],
+[class*="guildProfileUpsell_"],
+div:has(> [class*="mainColumn_"]),
+[class*="tryItOutSection_"],
+[class*="floatingNitroUpsell_"],
+[class*="nitroUpsellContainer_"],
+[class*="upsell_"]:has(> [class*="descriptionContainer_"] + [class*="buttonContainer_"]),
+[class*="newContentCard_"] {
+    display: none !important;
+}
+
+/* Go Live: HD ribbon, the SD/HD pill and the Nitro icons on locked options; stream quality icon */
+[class*="upsellRibbonContainer_"],
+[class*="premiumOptionContainer_"] > svg,
+[role="list"]:has(> [role="listitem"] > [class*="premiumOption_"]),
+[class*="premiumStreamIcon_"] {
+    display: none !important;
+}
+
+/* Appearance → Color Themes: everything after "Preview Theme" */
+[class*="tryItOutButtons_"] > :not(:first-child) {
+    display: none !important;
+}
+
+/* Server and group-DM limits, the "Share Nitro Perks" card in group DMs, the "Powered by Nitro"
+   system message's label and button, and the Scheduled inbox bar */
+[class*="experimentUpsellError_"],
+[class*="nitroUpsellBannerOverlay_"],
+[data-testid="contextual-referral-embed-card"],
+[class*="nitroBadge_"],
+div:has(> div > [class*="nitroBadge_"]) > [class*="buttonContainer_"],
+[class*="upsellBar_"] {
+    display: none !important;
+}
+
+/* Settings → Gift Inventory: partner promotions and "Claim all gifts with Nitro" (gift codes
+   stay); Friends list: friend-anniversary rows with Gift buttons */
+[class*="promotionCard_"],
+[class*="promoHeaderContainer_"],
+[class*="friendAnniversaryRow_"] {
     display: none !important;
 }
 
