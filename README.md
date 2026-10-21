@@ -2,8 +2,6 @@
 
 Hides Discord's ads and upsells: Quests and Orbs, Nitro and Shop promotions, and Server Boost prompts. It comes in two forms, a [Vencord](https://github.com/Vendicated/Vencord) userplugin ([`index.ts`](index.ts)) and a CSS theme ([`impede.theme.css`](impede.theme.css)). Install one of them, not both.
 
-The repository lives on [Forgejo](https://forgejo.causticpotato.org/abdulyasmin/impede) and is mirrored to [GitHub](https://github.com/abdulyasmin/impede).
-
 ## Plugin or theme
 
 The plugin stops upsells from rendering at all. They never report "viewed" analytics, a hidden promo notice does not hold back a payment warning, and lists close up around removed rows. Each item has its own toggle, and Vencord's reporter lists the patches a Discord update has broken. It needs Vencord built from source.
