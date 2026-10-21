@@ -7,7 +7,7 @@
 // Patches P1, P2, P5 and P8 are adapted from Equicord's Declutter, P10-P14 from Equicord's
 // Questify, and P9 from Vencord's CharacterCounter. Those projects are GPL-3.0-or-later;
 // AGPL-3.0 section 13 permits the combination, and the adapted parts stay under the GPL.
-// Every patch was checked against Discord stable build 634304 (2026-10-09).
+// Every patch was checked against Discord stable build 643186 (2026-10-21).
 
 import { findGroupChildrenByChildId } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
@@ -79,7 +79,8 @@ const HIDE_SELECTORS: Partial<Record<SettingKey, string[]>> = {
     questEmbeds: ['[class*="questEmbedCard_"]', '[class*="orbUserStatusMenuIconWrapper_"]'],
     dmNitro: ['li:has(> div > a[href="/store"])'],
     dmShop: ['li:has(> div > a[href="/shop"])'],
-    nagbars: ['[class*="notice_"][class*="colorPremium"]'],
+    // The premiumIcon_ exclusion keeps "your subscription is ending" (PREMIUM_UNCANCEL) visible.
+    nagbars: ['[class*="notice_"][class*="colorPremium"]:not(:has(> [class*="premiumIcon_"]))'],
     coachmarks: ['[data-mana-component="popover"]:has(> [class*="nitro-pink_"])'],
     messageLength: ['[class*="messageLengthUpsellContainer_"]'],
     subscribeButtons: [
@@ -147,7 +148,7 @@ const HIDE_SELECTORS: Partial<Record<SettingKey, string[]>> = {
 // Settings whose CSS is skipped for subscribers, who need the page and buttons it hides.
 const SUBSCRIBER_EXEMPT = new Set<SettingKey>(["nitroSettings", "subscribeButtons"]);
 
-// Notice types dropped by P6. Payment problems (PREMIUM_MISSING_PAYMENT, PREMIUM_PAST_DUE_*)
+// Notice types skipped by P6. Payment problems (PREMIUM_MISSING_PAYMENT, PREMIUM_PAST_DUE_*)
 // and PREMIUM_UNCANCEL describe the user's own subscription, so they stay.
 const PROMO_NOTICES = new Set([
     "PREMIUM_PROMO", "PREMIUM_MARKETING_NAGBAR", "PREMIUM_TIER_0_TRIAL_ENDING", "PREMIUM_TIER_2_TRIAL_ENDING",
@@ -156,7 +157,7 @@ const PROMO_NOTICES = new Set([
     "DETECTED_OFF_PLATFORM_PREMIUM_PERK_UPSELL", "CHECKOUT_RECOVERY_NAGBAR", "VOICE_DARE_OFFER",
 ]);
 
-// Dismissible-content units dropped by P7 and P15. Listed by name, because a pattern over the
+// Dismissible-content units dropped by P15. Listed by name, because a pattern over the
 // enum would also catch onboarding tips. Nothing is written to the account.
 const DismissibleContent = findByPropsLazy("DISMISSIBLE_CONTENT_UNSPECIFIED", "QUEST_HOME_NEW_QUEST_BADGE");
 const SUPPRESSED_DC_NAMES = [
@@ -247,17 +248,22 @@ export default definePlugin({
             predicate: () => settings.store.giftButton,
             replacement: { match: /&&\i\.push\(\([^&]*?,"gift"\)\)/, replace: "" },
         },
-        // P6: promotional notice bars
+        // P6: promotional notice bars. The store shows only the first notice in its priority list
+        // whose conditions hold, and promos come before payment problems, so promos are skipped
+        // there to let the next notice through. The second patch hides any promo that still
+        // reaches the notice bar.
+        {
+            find: 'displayName="NoticeStore"',
+            predicate: () => settings.store.nagbars,
+            replacement: {
+                match: /for\(let (\i) of \i\)if\((?=null!=(\i)\[\1\]&&\2\[\1\]\.predicate\()/,
+                replace: "$&!$self.isPromoNotice($1)&&",
+            },
+        },
         {
             find: ".APP_NOTICE_VIEWED,",
             predicate: () => settings.store.nagbars,
             replacement: { match: /(?<=\(\)=>)\i\.getNotice\(\)/, replace: "$self.filterNotice($&)" },
-        },
-        // P7: dismissible-content candidates for the few callers outside P15; client-side only
-        {
-            find: "userContent?.dismissedContents);return",
-            predicate: () => settings.store.coachmarks,
-            replacement: { match: /(?<=dismissedContents\);return \i\.filter\()(\i)=>/, replace: "$1=>!$self.isSuppressedDC($1)&&" },
         },
         // P8: Nitro-locked emoji, filtered from the data so the virtualised picker has no gaps.
         // The second replacement drops the "Available with Nitro" section from search results.
@@ -288,7 +294,8 @@ export default definePlugin({
         {
             find: "GLOBAL_DISCOVERY_SIDEBAR},",
             predicate: () => settings.store.discoverQuests,
-            replacement: { match: /(GLOBAL_DISCOVERY_TABS)\.map/, replace: '$1.filter(t=>t!=="quests").map' },
+            // Discord drops the tab itself when an experiment is on; force that branch.
+            replacement: { match: /location:"GlobalDiscoverySidebar"\}\)\.enabled(?=\?\i\.GLOBAL_DISCOVERY_TABS\.filter\()/, replace: "$&||!0" },
         },
         // P11: Active Now quest promo
         {
@@ -526,8 +533,8 @@ export default definePlugin({
             find: 'id:"shop-this-look"',
             predicate: () => settings.store.profileUpsells,
             replacement: [
-                { match: /(?<=return )(?=\i\|\|!\i\?null:\(0,\i\.jsxs\)\(\i\.\i,\{id:"shop-this-look")/, replace: "!0||" },
-                { match: /(?<=return )(?=\i\?\(0,\i\.jsx\)\(\i\.\i,\{id:"referral-profile-share-nitro")/, replace: "!1&&" },
+                { match: /(?<=if\()(?=[^)]+\)return null;let \i=[^;]+;return\(0,\i\.jsxs\)\(\i\.\i,\{id:"shop-this-look")/, replace: "!0||" },
+                { match: /(?<=return )(?=(?:\i&&)*\i\?\(0,\i\.jsx\)\(\i\.\i,\{id:"referral-profile-share-nitro")/, replace: "!1&&" },
             ],
         },
         // P30: badges: "Reorder badges with Nitro", the Nitro tenure modal, and badge-directory CTAs
@@ -761,15 +768,7 @@ export default definePlugin({
             predicate: () => settings.store.nitroPopups,
             replacement: { match: /\i\.intl\.string\(\i\.t#{intl::LOADING_TIP_20}\),/, replace: "" },
         },
-        // P44: settings: Favorites, App Icon, Color Themes, Nitro billing banner, Xbox connection
-        {
-            find: '"FavoritesGuildVisibilitySetting"',
-            predicate: () => settings.store.nitroPopups,
-            replacement: {
-                match: /(?<=onClick:\i\}\),)\(0,\i\.jsx\)\(\i\.\i,\{subscriptionTier:\i\.\i\.TIER_2,defaultTextOverride:\i\.intl\.string\([^)]+\)\}\)/,
-                replace: "null",
-            },
-        },
+        // P44: settings: App Icon, Color Themes, Nitro billing banner, Xbox connection
         {
             find: 'id:"upsell-button"',
             predicate: () => settings.store.nitroPopups,
@@ -935,6 +934,10 @@ export default definePlugin({
 
     messageFromHash(hash: string) {
         return getIntlMessageFromHash(hash);
+    },
+
+    isPromoNotice(type: string) {
+        return PROMO_NOTICES.has(type);
     },
 
     filterNotice(notice: { type?: string; } | null) {
