@@ -1,0 +1,18 @@
+# Secret scan only: the plugin compiles inside a Vencord checkout and the
+# theme is plain CSS, so there is nothing to build here. The steps live in
+# abdulyasmin/workflows.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gitleaks:
+    uses: abdulyasmin/workflows/.forgejo/workflows/gitleaks.yml@main
