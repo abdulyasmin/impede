@@ -1,0 +1,9 @@
+/**
+ * @name impede
+ * @author yasmin
+ * @description Hides Discord ads (Quests), Nitro and Shop upsells, and Server Boost prompts. Loads the current version of the theme each time Discord starts.
+ * @license AGPL-3.0-or-later
+ * @source https://forgejo.causticpotato.org/abdulyasmin/impede
+ */
+
+@import url("https://abdulyasmin.github.io/impede/impede.theme.css");

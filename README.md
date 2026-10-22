@@ -2,6 +2,20 @@
 
 Hides Discord's ads and upsells: Quests and Orbs, Nitro and Shop promotions, and Server Boost prompts. It comes in two forms, a [Vencord](https://github.com/Vendicated/Vencord) userplugin ([`index.ts`](index.ts)) and a CSS theme ([`impede.theme.css`](impede.theme.css)). Install one of them, not both.
 
+## Quickstart
+
+The theme needs no build and updates itself.
+
+In Vencord, Vesktop, Equicord or Equibop, open Settings → Themes → Online Themes and add this link:
+
+```
+https://abdulyasmin.github.io/impede/impede.theme.css
+```
+
+In BetterDiscord, open Settings → Themes, click **Open Themes Folder**, save [`impede.online.theme.css`](https://forgejo.causticpotato.org/abdulyasmin/impede/raw/branch/main/impede.online.theme.css) into that folder, and switch impede on.
+
+Discord loads the theme from GitHub Pages each time it starts or reloads (Ctrl+R), so each release reaches you without a download. To install it from a terminal, or to keep a copy you can edit, see [Theme](#theme). The plugin hides more but needs Vencord built from source; see [Plugin or theme](#plugin-or-theme).
+
 ## Plugin or theme
 
 The plugin stops upsells from rendering at all. They never report "viewed" analytics, a hidden promo notice does not hold back a payment warning, and lists close up around removed rows. Each item has its own toggle, and Vencord's reporter lists the patches a Discord update has broken. It needs Vencord built from source.
@@ -12,7 +26,7 @@ With both installed, the theme hides everything whatever the plugin's settings s
 
 ## Install
 
-`install.sh` (macOS and Linux) and `install.ps1` (Windows) install either form, and running them again updates it. The steps they automate are written out below each.
+`install.sh` (macOS and Linux) and `install.ps1` (Windows) install either form and update the plugin. The steps they automate are written out below each.
 
 ### Plugin
 
@@ -40,6 +54,7 @@ The script clones Vencord into `~/Vencord`, clones impede into its `src/userplug
 | `--discord PATH`, `-Discord PATH` | Patch this Discord install without asking |
 | `--vesktop`, `-Vesktop` | Point Vesktop at the build instead of patching Discord; quit Vesktop first |
 | `--no-inject`, `-NoInject` | Build only |
+| `--schedule`, `-Schedule` | Also update every day; see [Updating the plugin](#updating-the-plugin) |
 
 Then quit Discord fully (not just its window), start it again, and enable **Impede** in Settings → Vencord → Plugins. The cog next to it opens the settings listed under [What it hides](#what-it-hides).
 
@@ -54,7 +69,7 @@ pnpm build
 pnpm inject
 ```
 
-To update, run `git pull` in `Vencord` and in `src/userplugins/impede`, then `pnpm install --frozen-lockfile` and `pnpm build`, and restart Discord. Clone impede into `src/userplugins` rather than symlinking it there: esbuild follows the link to the real path, which has no `tsconfig.json`, and the `@api/...` imports fail to resolve.
+To update by hand, run `git pull` in `Vencord` and in `src/userplugins/impede`, then `pnpm install --frozen-lockfile` and `pnpm build`, and restart Discord. Clone impede into `src/userplugins` rather than symlinking it there: esbuild follows the link to the real path, which has no `tsconfig.json`, and the `@api/...` imports fail to resolve.
 
 Patching Discord differs between systems:
 
@@ -63,11 +78,37 @@ Patching Discord differs between systems:
 - Linux: Discord under `/usr` or `/opt`, or installed as a system-wide Flatpak, needs root to patch, and `pnpm inject` cannot ask for it. The script offers to retry as root. By hand, after `pnpm inject` has downloaded the installer, run `sudo env VENCORD_USER_DATA_DIR="$PWD" VENCORD_DEV_INSTALL=1 dist/Installer/VencordInstallerCli-linux --install` in the Vencord folder. Vencord does not support the Snap package of Discord.
 - Vesktop, on any system: skip `pnpm inject`. In Vesktop's settings, click **Open Developer Settings** at the bottom, set **Vencord Location** to the `dist` folder in your Vencord checkout, and restart Vesktop. The Flatpak build first needs `flatpak override --user dev.vencord.Vesktop --filesystem="$HOME/Vencord"`; without it, the location becomes a temporary path that breaks after a restart.
 
-If a Discord update removes Vencord, patch it again by rerunning the script or `pnpm inject`.
+If a Discord update removes Vencord, patch it again by rerunning the script with `plugin`, or with `pnpm inject`.
+
+#### Updating the plugin
+
+Vencord's own updater (Settings → Vencord → Updater) pulls Vencord only. It leaves impede at the commit you installed, because Vencord's git ignores `src/userplugins`.
+
+The scripts' `update` command updates both. It pulls Vencord and impede, rebuilds Vencord if either changed, and otherwise stops. It does not patch Discord again, so it asks no questions. Restart Discord afterwards to use the new build.
+
+```sh
+sh install.sh update
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 update
+```
+
+Add `--schedule` (`-Schedule`) to `update`, or to the first `plugin` run, to run `update` every day:
+
+| System | Job | When | Output |
+|---|---|---|---|
+| Linux | systemd user timer `impede-update.timer` | once a day, catching up after the computer was off | `journalctl --user -u impede-update` |
+| macOS | launch agent `org.causticpotato.impede.update` | at login and at noon | `~/Library/Logs/impede-update.log` |
+| Windows | Task Scheduler task "impede update" | at noon, or as soon as possible after a missed run | `%LOCALAPPDATA%\impede-update.log`, for the last run only |
+
+A new build applies the next time Discord starts. The job runs the copy of the script in the impede checkout, so the script updates too. `--unschedule` (`-Unschedule`) removes the job. If your Vencord checkout is not `~/Vencord`, pass `--vencord-dir` (`-VencordDir`) to `update` as well.
+
+On macOS and Linux, the job uses the Node.js that you scheduled it with. If a version manager such as fnm or nvm later removes that version, schedule again. On Windows, the task finds node through the PATH saved in Windows, and the script warns when node is not on it. Linux without systemd is not supported; the script prints the command to add to your crontab instead.
 
 ### Theme
 
-On macOS or Linux, with `install.sh` downloaded as above:
+The [Quickstart](#quickstart) adds the theme by hand. The scripts install it into the themes folder of every client mod they find, including Flatpak installs on Linux. On macOS or Linux, with `install.sh` downloaded as above:
 
 ```sh
 sh install.sh theme
@@ -79,13 +120,9 @@ On Windows, with `install.ps1` downloaded as above:
 powershell -ExecutionPolicy Bypass -File install.ps1 theme
 ```
 
-The script copies the theme into the themes folder of each client mod it finds, including Flatpak installs on Linux. Then switch impede on in Settings → Themes.
+They save [`impede.online.theme.css`](https://forgejo.causticpotato.org/abdulyasmin/impede/raw/branch/main/impede.online.theme.css) in each themes folder as `impede.theme.css`, replacing any older copy. That file holds the theme's header and an `@import` of the theme on GitHub Pages, so it updates the same way the Online Themes link does. Then switch impede on in Settings → Themes.
 
-By hand:
-
-1. Download [`impede.theme.css`](https://forgejo.causticpotato.org/abdulyasmin/impede/raw/branch/main/impede.theme.css).
-2. In Vencord, Vesktop or Equicord, open Settings → Themes → Local Themes and click **Open Themes Folder**. In BetterDiscord, open Settings → Themes and click **Open Themes Folder**.
-3. Move the file into that folder and switch the theme on.
+With `--copy` (`-Copy`), the scripts copy the whole [`impede.theme.css`](https://forgejo.causticpotato.org/abdulyasmin/impede/raw/branch/main/impede.theme.css) instead. Each rule in it has a comment saying what it hides; delete a rule to keep that element. The copy works without GitHub Pages but does not update. To update it, download the file again, or run a freshly downloaded script with `--copy` again; without `--copy`, the script replaces your copy with the online file. To copy it by hand, open the themes folder (in Vencord, Vesktop or Equicord, Settings → Themes → Local Themes → **Open Themes Folder**; in BetterDiscord, Settings → Themes → **Open Themes Folder**), move the file into it, and switch the theme on. Pasting the file's contents into Vencord's QuickCSS also works.
 
 The themes folders are:
 
@@ -99,9 +136,7 @@ The themes folders are:
 
 With the Discord Flatpak, the Linux folders are under `~/.var/app/com.discordapp.Discord/config/` instead of `~/.config/`. The Vesktop Flatpak uses `~/.var/app/dev.vencord.Vesktop/config/vesktop/themes`.
 
-Each rule in the file has a comment saying what it hides; delete a rule to keep that element. To update, download the file again over the old one. Pasting the file's contents into Vencord's QuickCSS also works.
-
-In Vencord or Vesktop you can instead add `https://cdn.jsdelivr.net/gh/abdulyasmin/impede@main/impede.theme.css` under Settings → Themes → Online Themes. The theme then updates without a download, once jsDelivr's cache picks up the change. Forgejo and GitHub raw links do not work there: they serve the file as plain text, which Discord will not apply as a stylesheet.
+Use the GitHub Pages link rather than a raw file link. Forgejo and GitHub serve raw files as plain text, which Discord will not apply as a stylesheet unless the client mod corrects it (Vencord does), and the Forgejo host is not on Vencord's list of allowed theme hosts. If you added the jsDelivr link (`https://cdn.jsdelivr.net/gh/abdulyasmin/impede@main/impede.theme.css`) before, replace it with the GitHub Pages one. jsDelivr tells Discord to keep its copy for a week, so releases arrive up to a week late.
 
 ## What it hides
 
@@ -185,6 +220,8 @@ If you use Equicord with Declutter enabled, turn off the overlapping DM-list set
 Client mods of any kind are against Discord's Terms of Service. There are no known cases of enforcement against mods that only hide UI.
 
 ## Development notes
+
+GitHub Pages serves the theme from the root of `main`; `.nojekyll` stops it from running Jekyll over the repository. A push to `main` reaches theme users once Pages has deployed it, and plugin users at their next `update`.
 
 Vencord's ESLint config requires its own GPL header on every file under `src/`, so `pnpm lint` reports `simple-header/header` on `index.ts`, which carries this project's AGPL header instead. Build and `tsc` pass.
 
