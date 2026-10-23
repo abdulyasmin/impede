@@ -48,6 +48,12 @@ $VencordUrl = "https://github.com/Vendicated/Vencord.git"
 $RawUrl = "https://raw.githubusercontent.com/abdulyasmin/impede/main"
 $MinNode = 22
 $TaskName = "impede update"
+$OriginalPath = $env:Path
+$PnpmShim = $null
+$UpdateLock = $null
+$UpdateLockPath = $null
+$BuildArtifacts = @("patcher.js", "preload.js", "renderer.js", "renderer.css", "vencordDesktopMain.js",
+    "vencordDesktopPreload.js", "vencordDesktopRenderer.js", "vencordDesktopRenderer.css")
 
 function Say([string]$Message) { Write-Host "==> $Message" }
 function Fail([string]$Message) { throw $Message }
@@ -68,16 +74,47 @@ function Test-Tools {
     if ($major -lt $MinNode) { Fail "Node.js $MinNode or newer is needed, found $(node --version)" }
 }
 
-# Vencord's scripts call pnpm by name, so a missing pnpm gets a shim on PATH that runs the
-# version pinned in Vencord's package.json through npx.
+# Vencord's scripts call pnpm by name. If the installed version differs from its pin,
+# put a shim on PATH that runs the pinned version through npx.
 function Initialize-Pnpm {
-    if (Have pnpm) { return }
-    $pm = node -p "require(process.argv[1]).packageManager.split('+')[0]" (Join-Path $VencordDir "package.json")
-    $shim = Join-Path ([IO.Path]::GetTempPath()) "impede-pnpm"
-    New-Item -ItemType Directory -Force -Path $shim | Out-Null
+    $pm = Run node -p "require(process.argv[1]).packageManager.split('+')[0]" (Join-Path $VencordDir "package.json")
+    if ($pm -notmatch '^pnpm@[0-9][a-zA-Z0-9.+-]*$') { Fail "unexpected package manager: $pm" }
+    if ((Have pnpm) -and (pnpm --version) -eq $pm.Substring(5)) { return }
+    if (-not (Have npx)) { Fail "npx is needed to run the pinned $pm version" }
+    $shim = Join-Path ([IO.Path]::GetTempPath()) ("impede-pnpm-" + [Guid]::NewGuid())
+    New-Item -ItemType Directory -Path $shim | Out-Null
+    $script:PnpmShim = $shim
     Set-Content -Encoding Ascii -Path (Join-Path $shim "pnpm.cmd") -Value "@npx --yes $pm %*"
     $env:Path = "$shim;$env:Path"
-    Say "pnpm not found; running $pm through npx"
+    Say "Running the pinned $pm through npx"
+}
+
+function Lock-Update {
+    $script:UpdateLockPath = "$VencordDir.impede-lock"
+    [IO.Directory]::CreateDirectory((Split-Path $VencordDir)) | Out-Null
+    try {
+        $script:UpdateLock = [IO.File]::Open($UpdateLockPath, [IO.FileMode]::OpenOrCreate,
+            [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    } catch {
+        Fail "another install/update may be running, or the lock is not writable: $UpdateLockPath"
+    }
+}
+
+function Test-Checkout([string]$Dir) {
+    $item = Get-Item -LiteralPath $Dir -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return }
+    if ($item.LinkType) { Fail "$Dir is a link; replace it with a clone" }
+    if (-not (Test-Path -LiteralPath (Join-Path $Dir ".git"))) { Fail "$Dir exists but is not a git checkout" }
+    if (Run git -C $Dir status --porcelain) { Fail "$Dir has local changes; commit or stash them before updating" }
+}
+
+function Test-Vencord {
+    $pkg = Join-Path $VencordDir "package.json"
+    if (-not (Test-Path -LiteralPath $pkg) -or (Run node -p "require(process.argv[1]).name" $pkg) -ne "vencord") {
+        Fail "$VencordDir is not a Vencord checkout"
+    }
+    $dist = Get-Item -LiteralPath (Join-Path $VencordDir "dist") -Force -ErrorAction SilentlyContinue
+    if ($dist -and ($dist.LinkType -or -not $dist.PSIsContainer)) { Fail "$VencordDir\dist must be a directory, not a link or file" }
 }
 
 function Sync-Repo([string]$Dir, [string]$Url, [string]$Fallback) {
@@ -112,12 +149,15 @@ function Invoke-Inject {
     # The same environment pnpm inject sets: patch Discord to load this checkout's dist folder.
     # The installer closes Discord before patching it.
     Say "Patching Discord"
+    $oldUserData = $env:VENCORD_USER_DATA_DIR
+    $oldDevInstall = $env:VENCORD_DEV_INSTALL
     $env:VENCORD_USER_DATA_DIR = $VencordDir
     $env:VENCORD_DEV_INSTALL = "1"
     try {
         Run $bin @installArgs
     } finally {
-        Remove-Item Env:VENCORD_USER_DATA_DIR, Env:VENCORD_DEV_INSTALL
+        $env:VENCORD_USER_DATA_DIR = $oldUserData
+        $env:VENCORD_DEV_INSTALL = $oldDevInstall
     }
 }
 
@@ -130,9 +170,12 @@ function Set-VesktopDir {
         Fail "Vesktop is running; quit it first, or it overwrites the setting on exit"
     }
     $dist = Join-Path $VencordDir "dist"
-    $script = "const fs = require('fs'), [file, dist] = process.argv.slice(1); let state = {}; " +
-        "try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {} " +
-        "state.vencordDir = dist; fs.writeFileSync(file, JSON.stringify(state, null, 4));"
+    $script = "const fs = require('fs'), crypto = require('crypto'), [file, dist] = process.argv.slice(1); let state = {}; " +
+        "try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; } " +
+        "if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('Invalid Vesktop state object'); " +
+        "state.vencordDir = dist; const temp = file + '.' + crypto.randomUUID() + '.tmp'; " +
+        "try { fs.writeFileSync(temp, JSON.stringify(state, null, 4), { flag: 'wx', mode: 0o600 }); fs.renameSync(temp, file); } " +
+        "finally { fs.rmSync(temp, { force: true }); }"
     Run node -e $script (Join-Path $dir "state.json") $dist
     Say "Set Vesktop's Vencord location to $dist"
 }
@@ -147,11 +190,50 @@ function Get-Revisions {
 # Runs in the Vencord checkout.
 function Build-Vencord {
     Initialize-Pnpm
-    Say "Installing Vencord's dependencies"
-    Run pnpm install --frozen-lockfile
-    Say "Building Vencord"
-    Run pnpm build
-    Set-Content -LiteralPath (Join-Path $VencordDir "dist\.impede-build") -Value (Get-Revisions)
+    $revision = Get-Revisions
+    $dist = Join-Path $VencordDir "dist"
+    $backup = "$VencordDir.impede-build-$([Guid]::NewGuid())"
+    New-Item -ItemType Directory -Path $backup | Out-Null
+    $savedDist = Join-Path $backup "dist"
+    $pending = $false
+    try {
+        if (Test-Path -LiteralPath $dist) { Copy-Item -LiteralPath $dist -Destination $savedDist -Recurse -Force }
+        $pending = $true
+        $marker = Join-Path $dist ".impede-build"
+        if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+        Say "Installing Vencord's dependencies"
+        Run pnpm install --frozen-lockfile
+        # Do not accept an old output when a successful build omits one of its files.
+        foreach ($artifact in $BuildArtifacts) {
+            $output = Join-Path $dist $artifact
+            if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Force }
+        }
+        Say "Building Vencord"
+        Run pnpm build
+        if (-not (Test-BuildComplete)) { Fail "build did not produce all required Vencord files" }
+        if ((Get-Revisions) -ne $revision) { Fail "checkout changed during the build; retry the update" }
+        Set-Content -LiteralPath (Join-Path $dist ".impede-build") -Value $revision
+        $pending = $false
+    } finally {
+        if ($pending) {
+            Say "Build failed; restoring the previous dist folder"
+            try {
+                if (Test-Path -LiteralPath $dist) { Remove-Item -LiteralPath $dist -Recurse -Force }
+                if (Test-Path -LiteralPath $savedDist) { Move-Item -LiteralPath $savedDist -Destination $dist }
+            } catch {
+                Fail "restore failed; previous build is in $backup. $($_.Exception.Message)"
+            }
+        }
+        Remove-Item -LiteralPath $backup -Recurse -Force
+    }
+}
+
+function Test-BuildComplete {
+    foreach ($artifact in $BuildArtifacts) {
+        $file = Get-Item -LiteralPath (Join-Path $VencordDir "dist\$artifact") -ErrorAction SilentlyContinue
+        if (-not $file -or $file.PSIsContainer -or $file.Length -eq 0) { return $false }
+    }
+    return $true
 }
 
 # Runs update every day from the copy of this script in the impede checkout. conhost --headless
@@ -193,11 +275,12 @@ function Unregister-Update {
 function Install-Plugin {
     Test-Tools
     $script:VencordDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($VencordDir)
+    Lock-Update
+    Test-Checkout $VencordDir
+    Test-Checkout (Join-Path $VencordDir "src\userplugins\impede")
+    if (Test-Path -LiteralPath $VencordDir) { Test-Vencord }
     Sync-Repo $VencordDir $VencordUrl
-    $pkg = Join-Path $VencordDir "package.json"
-    if (-not (Test-Path -LiteralPath $pkg) -or (node -p "require(process.argv[1]).name" $pkg) -ne "vencord") {
-        Fail "$VencordDir is not a Vencord checkout"
-    }
+    Test-Vencord
     $userplugins = Join-Path $VencordDir "src\userplugins"
     New-Item -ItemType Directory -Force -Path $userplugins | Out-Null
     Sync-Repo (Join-Path $userplugins "impede") $RepoUrl $MirrorUrl
@@ -228,15 +311,19 @@ function Update-Plugin {
     }
     Test-Tools
     $script:VencordDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($VencordDir)
+    Lock-Update
     $plugin = Join-Path $VencordDir "src\userplugins\impede"
     if (-not (Test-Path -LiteralPath (Join-Path $plugin ".git"))) {
         Fail "impede is not installed in $VencordDir; run install.ps1 plugin first"
     }
+    Test-Checkout $VencordDir
+    Test-Checkout $plugin
+    Test-Vencord
     Sync-Repo $VencordDir $VencordUrl
     Sync-Repo $plugin $RepoUrl
 
     $built = (Get-Content -LiteralPath (Join-Path $VencordDir "dist\.impede-build") -ErrorAction SilentlyContinue) -join "`n"
-    if ((Get-Revisions) -eq $built) {
+    if ((Test-BuildComplete) -and (Get-Revisions) -eq $built) {
         Say "Already up to date"
     } else {
         Push-Location $VencordDir
@@ -252,34 +339,48 @@ function Update-Plugin {
 
 function Install-Theme {
     $file = if ($Copy) { "impede.theme.css" } else { "impede.online.theme.css" }
-    $src = Join-Path ([IO.Path]::GetTempPath()) $file
-    $local = if ($PSScriptRoot) { Join-Path $PSScriptRoot $file } else { $null }
-    if ($local -and (Test-Path -LiteralPath $local)) {
-        Copy-Item -LiteralPath $local -Destination $src -Force
-    } else {
-        Say "Downloading $file"
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -UseBasicParsing -Uri "$RawUrl/$file" -OutFile $src
-    }
+    $src = [IO.Path]::GetTempFileName()
+    try {
+        $local = if ($PSScriptRoot) { Join-Path $PSScriptRoot $file } else { $null }
+        if ($local -and (Test-Path -LiteralPath $local)) {
+            Copy-Item -LiteralPath $local -Destination $src -Force
+        } else {
+            Say "Downloading $file"
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -UseBasicParsing -Uri "$RawUrl/$file" -OutFile $src
+        }
 
-    $clients = [ordered]@{
-        "Vencord" = "Vencord"
-        "Vesktop" = "vesktop"
-        "Equicord" = "Equicord"
-        "Equibop" = "equibop"
-        "BetterDiscord" = "BetterDiscord"
+        $clients = [ordered]@{
+            "Vencord" = "Vencord"
+            "Vesktop" = "vesktop"
+            "Equicord" = "Equicord"
+            "Equibop" = "equibop"
+            "BetterDiscord" = "BetterDiscord"
+        }
+        $count = 0
+        foreach ($client in $clients.GetEnumerator()) {
+            $dir = Join-Path $env:APPDATA $client.Value
+            if (-not (Test-Path -LiteralPath $dir)) { continue }
+            $themes = Join-Path $dir "themes"
+            New-Item -ItemType Directory -Force -Path $themes | Out-Null
+            $destination = Join-Path $themes "impede.theme.css"
+            $staged = Join-Path $themes (".impede-" + [Guid]::NewGuid() + ".tmp")
+            try {
+                [IO.File]::Copy($src, $staged, $false)
+                if (Test-Path -LiteralPath $destination) {
+                    [IO.File]::Replace($staged, $destination, [NullString]::Value)
+                } else {
+                    [IO.File]::Move($staged, $destination)
+                }
+            } finally {
+                if (Test-Path -LiteralPath $staged) { Remove-Item -LiteralPath $staged -Force }
+            }
+            Say "$($client.Key): $themes\impede.theme.css"
+            $count++
+        }
+    } finally {
+        Remove-Item -LiteralPath $src -Force
     }
-    $count = 0
-    foreach ($client in $clients.GetEnumerator()) {
-        $dir = Join-Path $env:APPDATA $client.Value
-        if (-not (Test-Path -LiteralPath $dir)) { continue }
-        $themes = Join-Path $dir "themes"
-        New-Item -ItemType Directory -Force -Path $themes | Out-Null
-        Copy-Item -LiteralPath $src -Destination (Join-Path $themes "impede.theme.css") -Force
-        Say "$($client.Key): $themes\impede.theme.css"
-        $count++
-    }
-    Remove-Item -LiteralPath $src
     if ($count -eq 0) { Fail "no Vencord, Vesktop, Equicord, Equibop or BetterDiscord settings folder found" }
     if ($Copy) {
         Say "Done. Switch impede on in Settings > Themes. Run this again to update it."
@@ -299,5 +400,12 @@ try {
     Write-Host "error: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 } finally {
+    if ($UpdateLock) {
+        $UpdateLock.Dispose()
+        # Leave the empty file in place: deleting it after releasing the handle can race
+        # with another updater that has already acquired it.
+    }
+    $env:Path = $OriginalPath
+    if ($PnpmShim) { Remove-Item -LiteralPath $PnpmShim -Recurse -Force }
     if ($Log) { Stop-Transcript | Out-Null }
 }

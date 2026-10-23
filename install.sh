@@ -11,6 +11,7 @@ MIRROR_URL="https://github.com/abdulyasmin/impede.git"
 VENCORD_URL="https://github.com/Vendicated/Vencord.git"
 RAW_URL="https://raw.githubusercontent.com/abdulyasmin/impede/main"
 MIN_NODE=22
+BUILD_ARTIFACTS="patcher.js preload.js renderer.js renderer.css vencordDesktopMain.js vencordDesktopPreload.js vencordDesktopRenderer.js vencordDesktopRenderer.css"
 
 # Where --schedule puts the daily update job.
 UNIT_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
@@ -19,6 +20,32 @@ AGENT_PLIST=$HOME/Library/LaunchAgents/$AGENT_LABEL.plist
 
 # setup_pnpm puts a temporary shim on PATH, which the scheduled job must not inherit.
 ORIG_PATH=$PATH
+shim="" src="" theme_tmp="" update_lock="" build_backup="" build_pending=0
+
+# shellcheck disable=SC2329 # Invoked by the EXIT trap.
+cleanup() {
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ "$build_pending" = 1 ]; then
+        say "Build failed; restoring the previous dist folder"
+        if ! rm -rf "$vencord/dist" ||
+            { [ -d "$build_backup/dist" ] && ! mv "$build_backup/dist" "$vencord/dist"; }; then
+            printf 'error: restore failed; previous build is in %s\n' "$build_backup" >&2
+            build_backup=""
+            status=1
+        fi
+    fi
+    [ -z "$build_backup" ] || rm -rf "$build_backup"
+    [ -z "$shim" ] || rm -rf "$shim"
+    [ -z "$src" ] || rm -f "$src"
+    [ -z "$theme_tmp" ] || rm -f "$theme_tmp"
+    [ -z "$update_lock" ] || rmdir "$update_lock"
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 usage() {
     cat <<'EOF'
@@ -78,23 +105,50 @@ check_tools() {
     [ "$major" -ge "$MIN_NODE" ] || die "Node.js $MIN_NODE or newer is needed, found $(node --version)"
 }
 
-# Vencord's scripts call pnpm by name, so a missing pnpm gets a shim on PATH that runs the
-# version pinned in Vencord's package.json through npx.
+# Vencord's scripts call pnpm by name. If the installed version differs from its pin,
+# put a shim on PATH that runs the pinned version through npx.
 setup_pnpm() {
-    have pnpm && return
     pm=$(node -p 'require(process.argv[1]).packageManager.split("+")[0]' "$vencord/package.json")
+    case $pm in pnpm@[0-9]*) ;; *) die "unexpected package manager: $pm" ;; esac
+    case $pm in *[!a-zA-Z0-9@.+-]*) die "invalid package manager version: $pm" ;; esac
+    if have pnpm && [ "$(pnpm --version)" = "${pm#pnpm@}" ]; then return; fi
+    have npx || die "npx is needed to run the pinned $pm version"
     shim=$(mktemp -d)
-    trap 'rm -rf "$shim"' EXIT
-    printf '#!/bin/sh\nexec npx --yes %s "$@"\n' "$pm" >"$shim/pnpm"
+    printf '#!/bin/sh\nexec npx --yes "%s" "$@"\n' "$pm" >"$shim/pnpm"
     chmod +x "$shim/pnpm"
     PATH="$shim:$PATH"
-    say "pnpm not found; running $pm through npx"
+    say "Running the pinned $pm through npx"
+}
+
+lock_updates() {
+    # A sibling directory also protects the initial clone. mkdir is atomic on both systems.
+    mkdir -p "$(dirname "$vencord")"
+    if ! mkdir "$vencord.impede-lock" 2>/dev/null; then
+        die "another install/update may be running: $vencord.impede-lock. Remove this directory only after checking no installer is running."
+    fi
+    update_lock="$vencord.impede-lock"
+}
+
+check_checkout() {
+    [ ! -L "$1" ] || die "$1 is a symlink; replace it with a clone"
+    [ -e "$1" ] || return 0
+    [ -e "$1/.git" ] || die "$1 exists but is not a git checkout"
+    checkout_status=$(git -C "$1" status --porcelain) || die "cannot inspect $1"
+    [ -z "$checkout_status" ] ||
+        die "$1 has local changes; commit or stash them before updating"
+}
+
+check_vencord() {
+    [ "$(node -p 'require(process.argv[1]).name' "$vencord/package.json" 2>/dev/null)" = vencord ] ||
+        die "$vencord is not a Vencord checkout"
+    [ ! -L "$vencord/dist" ] || die "$vencord/dist is a symlink; refusing to overwrite it"
+    [ ! -e "$vencord/dist" ] || [ -d "$vencord/dist" ] || die "$vencord/dist is not a directory"
 }
 
 clone_or_pull() { # dir url [fallback url]
     if [ -L "$1" ]; then
         die "$1 is a symlink; Vencord's build cannot resolve imports through one. Replace it with a clone."
-    elif [ -d "$1/.git" ]; then
+    elif [ -e "$1/.git" ]; then
         say "Updating $1"
         git -C "$1" pull --ff-only
     elif [ -e "$1" ]; then
@@ -153,11 +207,17 @@ point_vesktop() {
             die "Vesktop is running; quit it first, or it overwrites the setting on exit"
         fi
         node -e '
-            const fs = require("fs"), [file, dist] = process.argv.slice(1);
+            const fs = require("fs"), crypto = require("crypto"), [file, dist] = process.argv.slice(1);
             let state = {};
-            try { state = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+            try { state = JSON.parse(fs.readFileSync(file, "utf8")); }
+            catch (error) { if (error.code !== "ENOENT") throw error; }
+            if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error("Invalid Vesktop state object");
             state.vencordDir = dist;
-            fs.writeFileSync(file, JSON.stringify(state, null, 4));
+            const temp = file + "." + crypto.randomUUID() + ".tmp";
+            try {
+                fs.writeFileSync(temp, JSON.stringify(state, null, 4), { flag: "wx", mode: 0o600 });
+                fs.renameSync(temp, file);
+            } finally { fs.rmSync(temp, { force: true }); }
         ' "$dir/state.json" "$dist"
         say "Set Vesktop's Vencord location to $dist ($dir/state.json)"
         case $dir in
@@ -173,7 +233,7 @@ point_vesktop() {
 
 # The commits of Vencord and impede in the checkout, one per line.
 revisions() {
-    git -C "$vencord" rev-parse HEAD
+    git -C "$vencord" rev-parse HEAD || return
     git -C "$vencord/src/userplugins/impede" rev-parse HEAD
 }
 
@@ -181,15 +241,34 @@ revisions() {
 build_vencord() {
     cd "$vencord"
     setup_pnpm
+    build_revision=$(revisions)
+    build_backup=$(mktemp -d "$vencord.impede-build.XXXXXX")
+    if [ -d dist ]; then cp -pR dist "$build_backup/dist"; fi
+    build_pending=1
+    rm -f dist/.impede-build
     say "Installing Vencord's dependencies"
     pnpm install --frozen-lockfile
+    # A successful but incomplete build must not reuse files from the previous build.
+    for artifact in $BUILD_ARTIFACTS; do rm -f "dist/$artifact"; done
     say "Building Vencord"
     pnpm build
-    revisions >dist/.impede-build
+    build_complete || die "build did not produce all required Vencord files"
+    [ "$build_revision" = "$(revisions)" ] || die "checkout changed during the build; retry the update"
+    printf '%s\n' "$build_revision" >dist/.impede-build
+    build_pending=0
+    rm -rf "$build_backup"
+    build_backup=""
+}
+
+build_complete() {
+    for artifact in $BUILD_ARTIFACTS; do
+        [ -f "$vencord/dist/$artifact" ] && [ -s "$vencord/dist/$artifact" ] || return 1
+    done
 }
 
 # Unit files expand % specifiers, and plists are XML.
-unit_escape() { printf '%s' "$1" | sed 's/%/%%/g'; }
+unit_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g'; }
+exec_escape() { unit_escape "$1" | sed 's/\$/$$/g'; }
 xml_escape() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 
 # Runs update every day from the copy of this script in the impede checkout. A background job's
@@ -201,6 +280,8 @@ schedule_updates() {
     path="$(node -p 'require("path").dirname(process.execPath)'):$ORIG_PATH"
     case $OS in
         linux)
+            case "$path$script$vencord" in *'
+'*) die "systemd scheduling does not support paths containing newlines" ;; esac
             if ! { have systemctl && systemctl --user show-environment >/dev/null 2>&1; }; then
                 die "scheduling needs systemd; have cron run sh \"$script\" update --vencord-dir \"$vencord\" instead"
             fi
@@ -212,7 +293,7 @@ Description=Update impede and Vencord, and rebuild Vencord
 [Service]
 Type=oneshot
 Environment="PATH=$(unit_escape "$path")"
-ExecStart=/bin/sh "$(unit_escape "$script")" update --vencord-dir "$(unit_escape "$vencord")"
+ExecStart=/bin/sh "$(exec_escape "$script")" update --vencord-dir "$(exec_escape "$vencord")"
 EOF
             cat >"$UNIT_DIR/impede-update.timer" <<EOF
 [Unit]
@@ -233,7 +314,7 @@ EOF
             ;;
         mac)
             log="$HOME/Library/Logs/impede-update.log"
-            mkdir -p "$(dirname "$AGENT_PLIST")"
+            mkdir -p "$(dirname "$AGENT_PLIST")" "$(dirname "$log")"
             cat >"$AGENT_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -310,10 +391,14 @@ plugin() {
     done
     check_tools
 
-    case $vencord in /*) ;; *) vencord="$PWD/$vencord" ;; esac
+    vencord=$(node -p 'require("path").resolve(process.argv[1])' -- "$vencord")
+    lock_updates
+    # Check both trees before pulling either one.
+    check_checkout "$vencord"
+    check_checkout "$vencord/src/userplugins/impede"
+    if [ -d "$vencord" ]; then check_vencord; fi
     clone_or_pull "$vencord" "$VENCORD_URL"
-    [ "$(node -p 'require(process.argv[1]).name' "$vencord/package.json" 2>/dev/null)" = vencord ] ||
-        die "$vencord is not a Vencord checkout"
+    check_vencord
     mkdir -p "$vencord/src/userplugins"
     clone_or_pull "$vencord/src/userplugins/impede" "$REPO_URL" "$MIRROR_URL"
 
@@ -351,13 +436,17 @@ update() {
     fi
     check_tools
 
-    case $vencord in /*) ;; *) vencord="$PWD/$vencord" ;; esac
-    [ -d "$vencord/src/userplugins/impede/.git" ] ||
+    vencord=$(node -p 'require("path").resolve(process.argv[1])' -- "$vencord")
+    lock_updates
+    [ -e "$vencord/src/userplugins/impede/.git" ] ||
         die "impede is not installed in $vencord; run sh install.sh plugin first"
+    check_checkout "$vencord"
+    check_checkout "$vencord/src/userplugins/impede"
+    check_vencord
     clone_or_pull "$vencord" "$VENCORD_URL"
     clone_or_pull "$vencord/src/userplugins/impede" "$REPO_URL"
 
-    if [ "$(revisions)" = "$(cat "$vencord/dist/.impede-build" 2>/dev/null)" ]; then
+    if build_complete && [ "$(revisions)" = "$(cat "$vencord/dist/.impede-build" 2>/dev/null)" ]; then
         say "Already up to date"
     else
         build_vencord
@@ -378,7 +467,6 @@ theme() {
         shift
     done
     src=$(mktemp)
-    trap 'rm -f "$src"' EXIT
     here=$(dirname "$0")
     if [ -f "$here/$file" ]; then
         cp "$here/$file" "$src"
@@ -395,7 +483,11 @@ theme() {
     while IFS='|' read -r name dir; do
         [ -n "$dir" ] && [ -d "$dir" ] || continue
         mkdir -p "$dir/themes"
-        cp "$src" "$dir/themes/impede.theme.css"
+        [ ! -d "$dir/themes/impede.theme.css" ] || die "$dir/themes/impede.theme.css is a directory"
+        theme_tmp=$(mktemp "$dir/themes/.impede.XXXXXX")
+        cp "$src" "$theme_tmp"
+        mv -f "$theme_tmp" "$dir/themes/impede.theme.css"
+        theme_tmp=""
         say "$name: $dir/themes/impede.theme.css"
         count=$((count + 1))
     done <<EOF
@@ -417,13 +509,17 @@ EOF
     fi
 }
 
-[ $# -gt 0 ] || { usage; exit 1; }
-mode=$1
-shift
-case $mode in
-    plugin) plugin "$@" ;;
-    update) update "$@" ;;
-    theme) theme "$@" ;;
-    -h | --help | help) usage ;;
-    *) usage; exit 1 ;;
-esac
+main() {
+    [ $# -gt 0 ] || { usage; exit 1; }
+    mode=$1
+    shift
+    case $mode in
+        plugin) plugin "$@" ;;
+        update) update "$@" ;;
+        theme) theme "$@" ;;
+        -h | --help | help) usage ;;
+        *) usage; exit 1 ;;
+    esac
+}
+# Parse the exit together with the call: pulling impede may replace this script on disk.
+main "$@"; exit $?
