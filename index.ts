@@ -7,7 +7,7 @@
 // Patches P1, P2, P5 and P8 are adapted from Equicord's Declutter, P10-P14 from Equicord's
 // Questify, and P9 from Vencord's CharacterCounter. Those projects are GPL-3.0-or-later;
 // AGPL-3.0 section 13 permits the combination, and the adapted parts stay under the GPL.
-// Every patch was checked against Discord stable build 643186 (2026-10-21).
+// Every patch was checked against Discord stable build 647615 (2026-10-23).
 
 import { findGroupChildrenByChildId } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
@@ -79,8 +79,8 @@ const HIDE_SELECTORS: Partial<Record<SettingKey, string[]>> = {
     questEmbeds: ['[class*="questEmbedCard_"]', '[class*="orbUserStatusMenuIconWrapper_"]'],
     dmNitro: ['li:has(> div > a[href="/store"])'],
     dmShop: ['li:has(> div > a[href="/shop"])'],
-    // The premiumIcon_ exclusion keeps "your subscription is ending" (PREMIUM_UNCANCEL) visible.
-    nagbars: ['[class*="notice_"][class*="colorPremium"]:not(:has(> [class*="premiumIcon_"]))'],
+    // Keep payment warnings and subscription notices visible even if Discord adds wrappers.
+    nagbars: ['[class*="notice_"][class*="colorPremium"]:not([class*="colorWarning"]):not([class*="colorDanger"]):not(:has([class*="premiumIcon_"]))'],
     coachmarks: ['[data-mana-component="popover"]:has(> [class*="nitro-pink_"])'],
     messageLength: ['[class*="messageLengthUpsellContainer_"]'],
     subscribeButtons: [
@@ -104,13 +104,11 @@ const HIDE_SELECTORS: Partial<Record<SettingKey, string[]>> = {
         "#user-profile-overflow-menu-referral-profile-share-nitro",
         '[class*="contentWithUpsell_"] > [class*="nitro-pink_"]',
         '[class*="guildProfileUpsell_"]',
-        'div:has(> [class*="mainColumn_"])',
         '[class*="tryItOutSection_"]',
         '[class*="floatingNitroUpsell_"]',
         '[class*="nitroUpsellContainer_"]',
         '[class*="upsell_"]:has(> [class*="descriptionContainer_"] + [class*="buttonContainer_"])',
     ],
-    wishlists: ['[class*="newContentCard_"]'],
     nitroPopups: [
         '[class*="upsellRibbonContainer_"]',
         '[class*="premiumOptionContainer_"] > svg',
@@ -180,7 +178,9 @@ let suppressedDCs: Set<number> | undefined;
 let style: HTMLStyleElement | undefined;
 
 function hasSubscription() {
-    return !!UserStore.getCurrentUser()?.premiumType;
+    const user = UserStore.getCurrentUser();
+    // Keep account controls available until the current user is known.
+    return user == null || !!user.premiumType;
 }
 
 function updateStyle() {
@@ -345,29 +345,30 @@ export default definePlugin({
         },
 
         // P16: shared subscribe buttons and the "Get Nitro" action of the roadblock modal, which
-        // most upsells outside the patches below use. Subscribers keep the buttons.
+        // most upsells outside the patches below use. Subscribers keep the buttons. Change the
+        // rendered result after the hooks, so subscription changes cannot change their order.
         {
             find: '"buttonShineClassName"in',
             predicate: () => settings.store.subscribeButtons,
             replacement: {
-                match: /(?<=let \i=function\(\i\)\{)(?=let\{subscriptionTier:\i,onClick:\i,size:)/,
-                replace: "if(!$self.hasSubscription())return null;",
+                match: /return(?=\(0,\i\.jsx\)\(\i\.\i,\{onClick:\i,subscriptionTier:\i,postSuccessGuild:)/,
+                replace: "return !$self.hasSubscription()?null:",
             },
         },
         {
             find: ".disabled||!0===",
             predicate: () => settings.store.subscribeButtons,
             replacement: {
-                match: /(?<=let \i=function\(\i\)\{)(?=let\{subscriptionTier:\i,onClick:\i,postSuccessGuild:)/,
-                replace: "if(!$self.hasSubscription())return null;",
+                match: /return(?=\(0,\i\.jsx\)\(\i\.\i,\{onClick:\i,subscriptionTier:\i,postSuccessGuild:)/,
+                replace: "return !$self.hasSubscription()?null:",
             },
         },
         {
             find: '?"free_trial":',
             predicate: () => settings.store.subscribeButtons,
             replacement: {
-                match: /,\{text:\i,variant:"expressive",size:"md",onClick:async \i=>\{await \i\(\),\i\(\i\)\},icon:\i\.\i\}(?=\])/,
-                replace: "",
+                match: /,(\{text:\i,variant:"expressive",size:"md",onClick:async \i=>\{await \i\(\),\i\(\i\)\},icon:\i\.\i\})(?=\])/,
+                replace: ",...($self.hasSubscription()?[$1]:[])",
             },
         },
 
@@ -870,7 +871,7 @@ export default definePlugin({
             replacement: { match: /(?<=children:)(\i)(?=\?\i\.intl\.format\(\i\.default#{intl::juvXqj::raw},)/, replace: "!1" },
         },
         {
-            find: '"quest_nitro_reward_cta"',
+            find: ".NITRO_2_POINT_0_CTA)){",
             predicate: () => settings.store.nitroPopups,
             replacement: {
                 match: /(?<=(\i)=\i\?\.hasPaidTier2Subscription\(\).{0,1500}?if\(!\i)(?=\)return null;if\(\i\.config\.features\.includes\(\i\.\i\.NITRO_2_POINT_0_CTA\)\))/,
@@ -914,18 +915,12 @@ export default definePlugin({
         },
     },
 
-    flux: {
-        // The current user, and so their subscription, is not known until the gateway connects.
-        CONNECTION_OPEN() {
-            updateStyle();
-        },
-    },
-
     hasSubscription,
 
     // Nitro-only collectibles stay in the pickers for Nitro (tier 2) subscribers, who can use them.
     filterNitroCollectibles(items: unknown[]) {
-        return UserStore.getCurrentUser()?.premiumType === 2 ? items : [];
+        const user = UserStore.getCurrentUser();
+        return user == null || user.premiumType === 2 ? items : [];
     },
 
     message(key: string) {
@@ -947,9 +942,12 @@ export default definePlugin({
     isSuppressedDC(id: number) {
         if (!suppressedDCs) {
             try {
-                suppressedDCs = new Set(SUPPRESSED_DC_NAMES.map(name => DismissibleContent[name]).filter(v => typeof v === "number"));
+                const ids = SUPPRESSED_DC_NAMES.map(name => DismissibleContent[name]).filter(v => typeof v === "number");
+                // The module may not have loaded yet. Retry when another unit is checked.
+                if (!ids.length) return false;
+                suppressedDCs = new Set(ids);
             } catch {
-                suppressedDCs = new Set();
+                return false;
             }
         }
         return suppressedDCs.has(id);
@@ -957,11 +955,14 @@ export default definePlugin({
 
     start() {
         style = createAndAppendStyle("vc-impede", managedStyleRootNode);
+        UserStore.addChangeListener(updateStyle);
         updateStyle();
     },
 
     stop() {
+        UserStore.removeChangeListener(updateStyle);
         style?.remove();
         style = undefined;
+        suppressedDCs = undefined;
     },
 });

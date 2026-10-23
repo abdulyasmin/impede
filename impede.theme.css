@@ -74,20 +74,25 @@ li:has(> div > a[href="/shop"]) {
     display: none !important;
 }
 
-/* Promotional notice bars. Payment problems use colorWarning or colorDanger and are not matched.
-   The premiumIcon_ exclusion keeps "your subscription is ending" (PREMIUM_UNCANCEL) visible. */
-[class*="notice_"][class*="colorPremium"]:not(:has(> [class*="premiumIcon_"])) {
+/* Preserve warning/danger notices even when Discord also gives them promotional classes.
+   The premiumIcon_ exclusion keeps "your subscription is ending" visible through wrapper changes. */
+[class*="notice_"][class*="colorPremium"]:not(
+    [class*="colorWarning"], [class*="colorDanger"], :has([class*="premiumIcon_"])
+) {
     display: none !important;
 }
 
 /* Partner outbound promotion; build-specific hash, so this stops matching when Discord changes it */
-[class*="notice_"][class*="colorPremium"]:has(> [class*="premiumIcon__7b750"]) {
+[class*="notice_"][class*="colorPremium"]:has(> [class*="premiumIcon__7b750"]):not(
+    [class*="colorWarning"], [class*="colorDanger"]
+) {
     display: none !important;
 }
 
-/* Dark promo notices: trial and discount ending, Nitro marketing, game partner nagbars */
-[class*="notice_"]:has(> [class*="noticeContent_"]),
-[class*="notice_"]:has(> [class*="iconMetaQuest_"]) {
+/* Meta Quest promotion. Other dark notices have no safe promotion-specific selector. */
+[class*="notice_"]:has(> [class*="iconMetaQuest_"]):not(
+    [class*="colorWarning"], [class*="colorDanger"], :has([class*="premiumIcon_"])
+) {
     display: none !important;
 }
 
@@ -137,11 +142,9 @@ aside[class*="upsellContainer_"] {
     display: none !important;
 }
 
-/* "Get Nitro" and "Subscribe" buttons. The second selector matches buttons with the Nitro wheel
-   icon, which includes a few buttons subscribers use, such as "keep Nitro" in the cancel flow;
-   subscribers can delete it or use the plugin, which skips it for them. */
-button:has(> [class*="premiumSubscribeButton_"]),
-button[data-mana-component="button"]:has(path[d^="M16.23 12c0 1.29-.95 2.25-2.22 2.25"]) {
+/* Subscribe buttons with an upsell-specific class. The Nitro wheel icon is also used on
+   subscription-management buttons, so it cannot safely identify an upsell in a theme. */
+button:has(> [class*="premiumSubscribeButton_"]) {
     display: none !important;
 }
 
@@ -156,16 +159,14 @@ button[data-mana-component="button"]:has(path[d^="M16.23 12c0 1.29-.95 2.25-2.22
 }
 
 /* Profiles, the profile editor and the decoration pickers: "Reorder badges with Nitro", Shop
-   and try-it-out banners, Nitro-only sections, the display-name styles footer, and the
-   wishlist card in the profile popout */
+   and try-it-out banners, Nitro-only sections, and the display-name styles footer.
+   Generic layout/card classes cannot distinguish the remaining promotions from ordinary UI. */
 [class*="contentWithUpsell_"] > [class*="nitro-pink_"],
 [class*="guildProfileUpsell_"],
-div:has(> [class*="mainColumn_"]),
 [class*="tryItOutSection_"],
 [class*="floatingNitroUpsell_"],
 [class*="nitroUpsellContainer_"],
-[class*="upsell_"]:has(> [class*="descriptionContainer_"] + [class*="buttonContainer_"]),
-[class*="newContentCard_"] {
+[class*="upsell_"]:has(> [class*="descriptionContainer_"] + [class*="buttonContainer_"]) {
     display: none !important;
 }
 
