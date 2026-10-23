@@ -1,6 +1,5 @@
-# Secret scan only: the plugin compiles inside a Vencord checkout and the
-# theme is plain CSS, so there is nothing to build here. The steps live in
-# abdulyasmin/workflows.
+# Secret scan only. Plugin builds run inside Vencord; local regression commands
+# are documented in README.md. Shared CI steps live in abdulyasmin/workflows.
 name: ci
 
 on:

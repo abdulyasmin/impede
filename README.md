@@ -18,11 +18,11 @@ Discord loads the theme from GitHub Pages each time it starts or reloads (Ctrl+R
 
 ## Plugin or theme
 
-The plugin stops upsells from rendering at all. They never report "viewed" analytics, a hidden promo notice does not hold back a payment warning, and lists close up around removed rows. Each item has its own toggle, and Vencord's reporter lists the patches a Discord update has broken. It needs Vencord built from source.
+The plugin removes upsells with code patches and CSS fallbacks. Patches that prevent a component from mounting also prevent its "viewed" analytics; CSS fallbacks do not. The notice-store patch lets payment warnings through when it skips a promotion, and list patches close up around removed rows. Each item has its own toggle, and Vencord's reporter lists patches that no longer match after a Discord update. It needs Vencord built from source.
 
-The theme hides what CSS can reach of the same things. It needs no build and loads in any client mod that takes CSS themes: Vencord, Vesktop, Equicord, Equibop and BetterDiscord. Everything is hidden by default. Hidden elements still load and report analytics, and modals and popups stay; see [Theme limitations](#theme-limitations).
+The theme hides what CSS can reach of the same things. It needs no build and loads in any client mod that takes CSS themes: Vencord, Vesktop, Equicord, Equibop and BetterDiscord. Every included rule is enabled by default. Hidden elements still load and report analytics, and modals and popups stay; see [Theme limitations](#theme-limitations).
 
-With both installed, the theme hides everything whatever the plugin's settings say, so turning a plugin setting off has no visible effect.
+With both installed, the theme applies its rules regardless of the plugin's settings, so turning a plugin setting off may have no visible effect.
 
 ## Install
 
@@ -30,7 +30,7 @@ With both installed, the theme hides everything whatever the plugin's settings s
 
 ### Plugin
 
-You need git and Node.js 22 or newer. On Windows, `winget install Git.Git OpenJS.NodeJS.LTS` installs both; on macOS, `xcode-select --install` provides git and [nodejs.org](https://nodejs.org/en/download) or Homebrew provides Node; on Linux, use your package manager. pnpm is optional: when it is missing, the script runs the version Vencord pins through npx.
+You need git and Node.js 22 or newer. On Windows, `winget install Git.Git OpenJS.NodeJS.LTS` installs both; on macOS, `xcode-select --install` provides git and [nodejs.org](https://nodejs.org/en/download) or Homebrew provides Node; on Linux, use your package manager. The script uses Vencord's pinned pnpm version, running it through npx if your installed pnpm has a different version or is missing.
 
 On macOS or Linux:
 
@@ -84,7 +84,11 @@ If a Discord update removes Vencord, patch it again by rerunning the script with
 
 Vencord's own updater (Settings → Vencord → Updater) pulls Vencord only. It leaves impede at the commit you installed, because Vencord's git ignores `src/userplugins`.
 
-The scripts' `update` command updates both. It pulls Vencord and impede, rebuilds Vencord if either changed, and otherwise stops. It does not patch Discord again, so it asks no questions. Restart Discord afterwards to use the new build.
+The scripts' `update` command updates both. It pulls Vencord and impede and rebuilds when either changed or required build files are missing. It does not patch Discord again. Restart Discord after the update finishes to use the new build.
+
+The scripts refuse to update a checkout with local changes and prevent two installer runs from updating the same checkout at once. They save the previous `dist` folder before building and restore it if dependency installation or the build fails. Git pulls are fast-forward only; a failed build leaves the source checkouts at their new revisions so the next run retries the build.
+
+Vencord writes directly into `dist`, so wait for the update to finish before starting or reloading Discord. A power loss or forced process termination can interrupt recovery. The backup is beside the Vencord checkout, named `Vencord.impede-build.*` on macOS/Linux or `Vencord.impede-build-*` on Windows. On macOS/Linux, remove a leftover `Vencord.impede-lock` directory only after checking that no installer is running. If recovery is needed, preserve the backup and restore its `dist` folder before restarting Discord.
 
 ```sh
 sh install.sh update
@@ -140,7 +144,7 @@ Use the GitHub Pages link rather than a raw file link. Forgejo and GitHub serve 
 
 ## What it hides
 
-Each item has its own toggle in the plugin settings. Items marked "restart" are webpack patches and take effect after Discord reloads; the rest switch immediately. The theme covers every row except `questBadges` and `blockQuestFetch` as far as CSS can, including the ones the plugin leaves off by default, and it hides Settings → Nitro and the Get Nitro buttons whether or not you subscribe.
+Each item has its own toggle in the plugin settings. Items marked "restart" are webpack patches and take effect after Discord reloads; the rest switch immediately. The theme covers many of the same surfaces, including some the plugin leaves off by default, but cannot filter fetched data or identify every upsell safely. It hides Settings → Nitro whether or not you subscribe; see [Theme limitations](#theme-limitations).
 
 | Setting | Hides | Default | Applies |
 |---|---|---|---|
@@ -183,22 +187,23 @@ CSS cannot do everything the plugin does:
 - Discord shows one notice bar at a time. A promo notice hidden with CSS still holds that slot, so a payment-problem notice queued behind it stays hidden until the promo ends.
 - Hidden DM-list and channel-list rows leave blank space at the end of those lists, and hidden DM rows still take arrow-key focus.
 - Nitro-locked emoji leave blank cells instead of disappearing. Locked stickers and sounds stay, as do the "Available with Nitro" search sections.
-- Modals and popups stay: the Nitro announcement and reverse-trial modals, the file-too-large and limit dialogs, the server-cap modal and the Super Reaction modal. Hiding a modal with CSS leaves its focus lock in place and freezes the app, so the theme only hides the Get Nitro buttons inside them.
+- Modals and popups stay: the Nitro announcement and reverse-trial modals, the file-too-large and limit dialogs, the server-cap modal and the Super Reaction modal. Hiding a modal with CSS leaves its focus lock in place and freezes the app, so the theme hides only identifiable Get Nitro buttons inside them.
 - The Super Reaction toggle stays, and so does Nitro wording in plain text: the emoji, sticker and Soundmoji popout descriptions, quest rewards, the Orb wallet and a loading-screen tip.
-- The wishlist in the full profile's sidebar stays; its classes are shared with the Shop page.
-- The Get Nitro button rule matches buttons by the Nitro icon, which a few subscriber buttons also carry, such as "keep Nitro" in the cancel flow. If you subscribe, delete that selector or use the plugin.
+- Wishlists and some profile promotions stay when their only selectors are generic layout or card classes shared with ordinary content.
+- Buttons identifiable only by the Nitro icon stay visible. Subscription-management actions such as "keep Nitro" use that icon too.
+- Some dark promotional notices stay visible because their layout is shared with account notices. Warning and danger notices, and notices with subscription-management icons, are excluded from the general promo rules.
 - The coachmark rule also hides a few feature tips that use the same Nitro gradient, and coachmarks hidden this way are never dismissed.
 - The partner-promotion notice rule uses a build-specific class hash and stops matching when Discord rebuilds that stylesheet.
 
 ## How it works
 
-Most surfaces are removed by webpack patches that stop the component from rendering. A patched upsell never mounts, so it also never reports an "upsell viewed" event, and when Discord changes the code Vencord logs the patch as failed instead of hiding the wrong thing. Patches are anchored on strings Discord needs for its own purposes (React list keys, route enums, flux action names, analytics reasons, intl keys), which have lasted much longer than the regexes around them.
+Most surfaces are removed by webpack patches. Some prevent mounting, while others filter data or remove an upsell after the component's hooks run. Patches use React list keys, route enums, flux action names, analytics reasons and intl keys as anchors. Vencord reports replacements that fail to match, but a matching regex does not prove the surrounding behavior is unchanged. Subscription-dependent rendering keeps hooks in their original order, and subscriber controls stay available while the current account is unknown.
 
-A stylesheet covers the rest: CSS fallbacks for the patched surfaces, using routing and test attributes (`href`, `data-testid`, `data-settings-sidebar-item`) that survived Discord's class-name changes in 2023 and 2025, and small inline upsells that have no stable code anchor. Those use `[class*="name_"]` selectors, which match both of Discord's current class shapes (`name_abc123`, `name__0abcd`). Each prefix was checked against all CSS in Discord build 634304: each matches only upsell classes, except `notice_`, `ctaButton_`, `upsell_` and `buttonContainer_`, which are only used inside a selector that narrows them to an upsell.
+A stylesheet covers the rest with routing and test attributes (`href`, `data-testid`, `data-settings-sidebar-item`) and class prefixes for inline upsells. The `[class*="name_"]` selectors match both class shapes (`name_abc123`, `name__0abcd`). Discord can rename or reuse those classes. Generic profile-layout and card selectors are omitted, and payment-warning exclusions take precedence over promotional notice styles.
 
 ## Maintenance
 
-Expect a patch regex to break somewhere most months; the gift button and DM-list rows break most often. A broken patch only brings back its own upsell; the others keep working. Vencord's reporter loads logged-out discord.com in headless Chrome and lists every patch that no longer matches:
+Discord updates can break patch regexes. A replacement that stops matching usually brings back its upsell, but partial matches or changed component behavior need review too. Vencord's reporter loads logged-out discord.com in headless Chrome and reports patches that no longer match:
 
 ```sh
 cd Vencord
@@ -208,6 +213,8 @@ CHROMIUM_BIN="/path/to/chrome" node dist/report.mjs
 ```
 
 The reporter does not test CSS selectors, the plugin's or the theme's, so a stale selector shows the upsell again with no warning.
+
+On 2026-10-23, the reporter found no Impede patch failures on Discord stable build 647615 with Vencord commit `b0e636d`. Offline replay against that build also passed with default settings, every setting enabled, every setting disabled, and each setting enabled separately. This checks matches and JavaScript syntax; it does not replace testing logged-in behavior after Discord changes.
 
 If you use Equicord with Declutter enabled, turn off the overlapping DM-list settings in one of the two plugins; Declutter already removes those rows, and impede's keyboard-navigation patch will report "had no effect".
 
@@ -224,6 +231,23 @@ Client mods of any kind are against Discord's Terms of Service. There are no kno
 GitHub Pages serves the theme from the root of `main`; `.nojekyll` stops it from running Jekyll over the repository. A push to `main` reaches theme users once Pages has deployed it, and plugin users at their next `update`.
 
 Vencord's ESLint config requires its own GPL header on every file under `src/`, so `pnpm lint` reports `simple-header/header` on `index.ts`, which carries this project's AGPL header instead. Build and `tsc` pass.
+
+Run the local regressions from this repository with Node.js 24, Python 3 and Chromium:
+
+```sh
+node tests/plugin.test.mjs
+python3 tests/install_test.py
+CHROMIUM_BIN=/path/to/chromium python3 tests/test_theme.py
+shellcheck install.sh
+```
+
+The plugin tests exercise subscription changes, hook order, notice filtering and lazy module recovery. The installer tests use temporary checkouts and mock git/pnpm, including failed builds, incomplete output, concurrent updates and invalid Vesktop settings. If `pwsh` is available, they also run the portable PowerShell cases; otherwise those cases are skipped. Set `IMPEDE_TEST_PWSH=/path/to/pwsh` to choose a PowerShell executable. Windows injection and Task Scheduler still need checks on Windows.
+
+On macOS, also run `python3 tests/macos_test.py`. It checks native launchd registration, execution, rescheduling and removal with an isolated job that only records its arguments. It also checks plist escaping, theme replacement and Vesktop settings in temporary directories. If there is no GUI login, it tests a copy of the generated plist in the user domain with a Background session type; the original GUI plist stays unchanged.
+
+These macOS checks passed on 2026-10-23 on macOS 26.6.1, Apple silicon, with Node.js 24.3.0, alongside the plugin and shell installer regressions. Vencord's universal macOS installer also downloaded and ran its version command. GUI-session bootstrap and actual Discord injection were not exercised.
+
+The theme tests load the complete stylesheet in an offline browser and check that account notices and ordinary content remain visible. They use synthetic DOM fixtures, so run the Vencord reporter and check the affected Discord screens when changing patches or selectors. CI currently runs the shared secret scan; these regression commands are local checks.
 
 ## Credits
 
