@@ -1,5 +1,6 @@
-# Secret scan only. Plugin builds run inside Vencord; local regression commands
-# are documented in README.md. Shared CI steps live in abdulyasmin/workflows.
+# The offline regressions and the shared secret scan. The check against
+# today's Discord build is report.yml. Shared CI steps live in
+# abdulyasmin/workflows.
 name: ci
 
 on:
@@ -14,6 +15,55 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  PLAYWRIGHT_VERSION: 1.64.1
+  PWSH_VERSION: 7.6.8
+  PWSH_SHA256_X64: 59112e38ad83350e4f6dc0195953c66b5926792f300ca2e7691b8242e7a16e7f
+  PWSH_SHA256_ARM64: 3179e07fd98f026d39c730ebcb7626d071aac3351b171dda13f9f38d99efcef0
+  # Debian's 0.10 reports the EXIT trap handler as unreachable (SC2317).
+  SHELLCHECK_VERSION: 0.11.0
+  SHELLCHECK_SHA256_X64: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+  SHELLCHECK_SHA256_ARM64: 12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588
+
 jobs:
+  test:
+    runs-on: docker
+    timeout-minutes: 20
+    container:
+      image: forgejo.causticpotato.org/abdulyasmin/ci:latest
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+      - uses: https://code.forgejo.org/actions/cache@v4
+        with:
+          path: /root/.cache/ms-playwright
+          key: playwright-shell-${{ env.PLAYWRIGHT_VERSION }}
+      - uses: https://code.forgejo.org/actions/cache@v4
+        with:
+          path: /opt/tools
+          key: tools-pwsh-${{ env.PWSH_VERSION }}-shellcheck-${{ env.SHELLCHECK_VERSION }}
+      - name: Install Python, Chromium, PowerShell and ShellCheck
+        run: |
+          apt-get update -qq
+          apt-get install -qq -y --no-install-recommends python3 libicu76
+          npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps --only-shell chromium
+          [ -x /opt/tools/pwsh/pwsh ] && [ -x /opt/tools/shellcheck ] && exit 0
+          case "$(uname -m)" in
+            x86_64) pwsh_arch=x64; pwsh_sha="$PWSH_SHA256_X64"; sc_arch=x86_64; sc_sha="$SHELLCHECK_SHA256_X64" ;;
+            aarch64) pwsh_arch=arm64; pwsh_sha="$PWSH_SHA256_ARM64"; sc_arch=aarch64; sc_sha="$SHELLCHECK_SHA256_ARM64" ;;
+            *) echo "no pinned builds for $(uname -m)" >&2; exit 1 ;;
+          esac
+          curl -fsSLo /tmp/pwsh.tar.gz "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VERSION}/powershell-${PWSH_VERSION}-linux-${pwsh_arch}.tar.gz"
+          echo "$pwsh_sha  /tmp/pwsh.tar.gz" | sha256sum -c -
+          curl -fsSLo /tmp/shellcheck.tar.xz "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.${sc_arch}.tar.xz"
+          echo "$sc_sha  /tmp/shellcheck.tar.xz" | sha256sum -c -
+          mkdir -p /opt/tools/pwsh
+          tar -xzf /tmp/pwsh.tar.gz -C /opt/tools/pwsh && chmod +x /opt/tools/pwsh/pwsh
+          tar -xJf /tmp/shellcheck.tar.xz -C /opt/tools --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          rm -f /tmp/pwsh.tar.gz /tmp/shellcheck.tar.xz
+      - run: node tests/plugin.test.mjs
+      - run: IMPEDE_TEST_PWSH=/opt/tools/pwsh/pwsh python3 tests/install_test.py
+      - run: CHROMIUM_BIN="$(find /root/.cache/ms-playwright -name chrome-headless-shell -type f | head -1)" python3 tests/test_theme.py
+      - run: /opt/tools/shellcheck install.sh
+
   gitleaks:
     uses: abdulyasmin/workflows/.forgejo/workflows/gitleaks.yml@main
