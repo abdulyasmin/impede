@@ -140,7 +140,7 @@ The themes folders are:
 
 With the Discord Flatpak, the Linux folders are under `~/.var/app/com.discordapp.Discord/config/` instead of `~/.config/`. The Vesktop Flatpak uses `~/.var/app/dev.vencord.Vesktop/config/vesktop/themes`.
 
-Use the GitHub Pages link rather than a raw file link. Forgejo and GitHub serve raw files as plain text, which Discord will not apply as a stylesheet unless the client mod corrects it (Vencord does), and the Forgejo host is not on Vencord's list of allowed theme hosts. If you added the jsDelivr link (`https://cdn.jsdelivr.net/gh/abdulyasmin/impede@main/impede.theme.css`) before, replace it with the GitHub Pages one. jsDelivr tells Discord to keep its copy for a week, so releases arrive up to a week late.
+Use the GitHub Pages link rather than a raw file link. Forgejo and GitHub serve raw files as plain text, which Discord will not apply as a stylesheet unless the client mod corrects it (Vencord does), and the Forgejo host is not on Vencord's list of allowed theme hosts.
 
 ## What it hides
 
@@ -203,18 +203,16 @@ A stylesheet covers the rest with routing and test attributes (`href`, `data-tes
 
 ## Maintenance
 
-Discord updates can break patch regexes. A replacement that stops matching usually brings back its upsell, but partial matches or changed component behavior need review too. Vencord's reporter loads logged-out discord.com in headless Chrome and reports patches that no longer match:
+Discord updates can break patch regexes and CSS selectors. A replacement or selector that stops matching usually brings back its upsell, but partial matches or changed component behavior need review too.
+
+`tests/discord_report.mjs` loads logged-out discord.com in headless Chromium with Vencord's reporter build, which loads every lazy chunk. It reports Impede patches and finds that no longer match, including `all: true` patches whose find matches no module, and class names, ids and attribute values in the theme and the plugin's CSS fallbacks that no Discord stylesheet or module contains any more. From a Vencord checkout with impede in `src/userplugins/impede`:
 
 ```sh
-cd Vencord
 pnpm buildReporter
-npx esbuild scripts/generateReport.ts > dist/report.mjs
-CHROMIUM_BIN="/path/to/chrome" node dist/report.mjs
+CHROMIUM_BIN="/path/to/chromium" node src/userplugins/impede/tests/discord_report.mjs
 ```
 
-The reporter does not test CSS selectors, the plugin's or the theme's, so a stale selector shows the upsell again with no warning.
-
-On 2026-10-23, the reporter found no Impede patch failures on Discord stable build 647615 with Vencord commit `b0e636d`. Offline replay against that build also passed with default settings, every setting enabled, every setting disabled, and each setting enabled separately. This checks matches and JavaScript syntax; it does not replace testing logged-in behavior after Discord changes.
+The `report` workflow runs it every day against the current Vencord main, and after each change to the plugin or the theme. A selector that is still present can match a different element after a Discord change, and logged-in behavior is not tested, so check the affected screens after changing patches or selectors.
 
 If you use Equicord with Declutter enabled, turn off the overlapping DM-list settings in one of the two plugins; Declutter already removes those rows, and impede's keyboard-navigation patch will report "had no effect".
 
@@ -232,12 +230,12 @@ GitHub Pages serves the theme from the root of `main`; `.nojekyll` stops it from
 
 Vencord's ESLint config requires its own GPL header on every file under `src/`, so `pnpm lint` reports `simple-header/header` on `index.ts`, which carries this project's AGPL header instead. Build and `tsc` pass.
 
-Run the local regressions from this repository with Node.js 24, Python 3 and Chromium:
+Run the local regressions from this repository with Node.js 24, Python 3 and Chromium's headless shell, which `npx playwright install --only-shell chromium` downloads. On Linux, full Chrome for Testing 151 and 154 hang on the theme test's `--dump-dom`.
 
 ```sh
 node tests/plugin.test.mjs
 python3 tests/install_test.py
-CHROMIUM_BIN=/path/to/chromium python3 tests/test_theme.py
+CHROMIUM_BIN=/path/to/chrome-headless-shell python3 tests/test_theme.py
 shellcheck install.sh
 ```
 
@@ -245,9 +243,7 @@ The plugin tests exercise subscription changes, hook order, notice filtering and
 
 On macOS, also run `python3 tests/macos_test.py`. It checks native launchd registration, execution, rescheduling and removal with an isolated job that only records its arguments. It also checks plist escaping, theme replacement and Vesktop settings in temporary directories. If there is no GUI login, it tests a copy of the generated plist in the user domain with a Background session type; the original GUI plist stays unchanged.
 
-These macOS checks passed on 2026-10-23 on macOS 26.6.1, Apple silicon, with Node.js 24.3.0, alongside the plugin and shell installer regressions. Vencord's universal macOS installer also downloaded and ran its version command. GUI-session bootstrap and actual Discord injection were not exercised.
-
-The theme tests load the complete stylesheet in an offline browser and check that account notices and ordinary content remain visible. They use synthetic DOM fixtures, so run the Vencord reporter and check the affected Discord screens when changing patches or selectors. CI currently runs the shared secret scan; these regression commands are local checks.
+The theme tests load the complete stylesheet in an offline browser and check that account notices and ordinary content remain visible. They use synthetic DOM fixtures, so they say nothing about the current Discord build; see [Maintenance](#maintenance). The `ci` workflow runs these regressions, except the macOS ones, on pushes to `main` and on pull requests, except those that change only documentation, with PowerShell 7 for the portable cases.
 
 ## Credits
 
