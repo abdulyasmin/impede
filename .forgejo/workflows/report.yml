@@ -1,0 +1,72 @@
+# Checks impede against the Discord build discord.com serves today, with
+# Vencord's reporter and the current Vencord main (tests/discord_report.mjs),
+# every day and after a change to the plugin or the theme. A failure is pushed
+# to ntfy when the account has the NTFY_TOPIC_URL and NTFY_TOKEN secrets.
+name: report
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  push:
+    branches: [main]
+    paths: ['index.ts', 'impede.theme.css', 'tests/discord_report.mjs', '.forgejo/workflows/report.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  PLAYWRIGHT_VERSION: 1.64.1
+
+jobs:
+  report:
+    runs-on: docker
+    timeout-minutes: 30
+    container:
+      image: forgejo.causticpotato.org/abdulyasmin/ci:latest
+    steps:
+      - name: Clone Vencord
+        run: git clone --depth 1 https://github.com/Vendicated/Vencord Vencord
+      # A clone, not a symlink: esbuild resolves a symlinked userplugin to its
+      # real path, where the @api imports do not resolve.
+      - uses: https://code.forgejo.org/actions/checkout@v4
+        with:
+          path: Vencord/src/userplugins/impede
+      - uses: https://code.forgejo.org/actions/cache@v4
+        with:
+          path: /root/.cache/ms-playwright
+          key: playwright-shell-${{ env.PLAYWRIGHT_VERSION }}
+      - uses: https://code.forgejo.org/actions/cache@v4
+        with:
+          path: /root/.cache/pnpm-store
+          key: pnpm-${{ hashFiles('Vencord/pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+      - name: Install Chromium
+        run: npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps --only-shell chromium
+      - name: Build Vencord's reporter with impede
+        working-directory: Vencord
+        run: |
+          git log -1 --format='Vencord %h %cs %s'
+          npm install -g --no-fund "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '')")"
+          pnpm install --frozen-lockfile --store-dir /root/.cache/pnpm-store
+          pnpm buildReporter
+      - name: Check impede against today's Discord
+        working-directory: Vencord
+        run: |
+          set -o pipefail
+          export CHROMIUM_BIN="$(find /root/.cache/ms-playwright -name chrome-headless-shell -type f | head -1)"
+          node src/userplugins/impede/tests/discord_report.mjs | tee "$GITHUB_WORKSPACE/report.txt"
+      - name: Push the failure to ntfy
+        if: failure()
+        env:
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+          RUNS_URL: ${{ github.server_url }}/${{ github.repository }}/actions?workflow=report.yml
+        run: |
+          [ -n "$NTFY_TOPIC_URL" ] || { echo "no NTFY_TOPIC_URL secret, not pushing"; exit 0; }
+          report="$GITHUB_WORKSPACE/report.txt"
+          [ -s "$report" ] || echo "the check did not run; see the run log" >"$report"
+          head -c 3800 "$report" | curl -fsS -o /dev/null -H "Authorization: Bearer $NTFY_TOKEN" \
+            -H "Title: impede no longer matches Discord" -H "Priority: default" -H "Tags: warning" \
+            -H "Click: $RUNS_URL" --data-binary @- "$NTFY_TOPIC_URL"
