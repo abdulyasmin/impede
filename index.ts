@@ -16,7 +16,7 @@ import { createAndAppendStyle } from "@utils/css";
 import { getIntlMessage, getIntlMessageFromHash } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
 import { findByPropsLazy } from "@webpack";
-import { UserStore } from "@webpack/common";
+import { Alerts, UserStore } from "@webpack/common";
 
 const needsRestart = (description: string, enabled = true) => ({
     type: OptionType.BOOLEAN as const,
@@ -202,6 +202,15 @@ export default definePlugin({
     searchTerms: ["ads", "nitro", "quests", "orbs", "shop", "boost", "upsell", "gift"],
     authors: [{ name: "yasmin", id: 0n }],
     settings,
+
+    showGuildCapAlert(onCloseCallback?: () => void) {
+        Alerts.show({
+            title: "Server limit reached",
+            body: "You've reached the maximum number of servers for your account. Leave a server before joining another one.",
+            confirmText: "Okay",
+            onConfirm: onCloseCallback,
+        });
+    },
 
     patches: [
         // P1: DM-list rows
@@ -725,8 +734,8 @@ export default definePlugin({
             find: '"nitro-guild-cap-upsell"',
             predicate: () => settings.store.nitroPopups,
             replacement: {
-                match: /(?<=function \i\(\i\)\{)(?=let\{onCloseCallback:\i,analyticsLocations:\i,\.\.\.\i\}=\i;\(0,\i\.openModalLazy\))/,
-                replace: "return;",
+                match: /(?<=function \i\((\i)\)\{)(?=let\{onCloseCallback:\i,analyticsLocations:\i,\.\.\.\i\}=\1;\(0,\i\.openModalLazy\))/,
+                replace: "return $self.showGuildCapAlert($1.onCloseCallback);",
             },
         },
         {

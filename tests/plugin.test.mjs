@@ -15,7 +15,9 @@ function loadPlugin() {
     let enumThrows = true;
     const listeners = new Set();
     const styles = [];
+    const alerts = [];
     const context = {
+        Alerts: { show: alert => alerts.push(alert) },
         definePlugin: plugin => plugin,
         OptionType: { BOOLEAN: "boolean" },
         definePluginSettings(definitions) {
@@ -52,6 +54,7 @@ function loadPlugin() {
     runInNewContext(source, context, { filename: "index.ts" });
     return {
         plugin: context.plugin,
+        alerts,
         styles,
         listeners,
         setUser(value) {
@@ -207,6 +210,36 @@ test("the roadblock patch preserves subscriber actions", () => {
     assert.equal(render().length, 1);
     harness.setUser({ premiumType: 2 });
     assert.equal(render().length, 2);
+});
+
+test("server-cap invite gates retain a visible limit explanation", () => {
+    const harness = loadPlugin();
+    const patch = harness.plugin.patches.find(patch => patch.find === '"nitro-guild-cap-upsell"');
+    const identifier = "[A-Za-z_$][\\w$]*";
+    const match = new RegExp(patch.replacement.match.source.replaceAll("\\i", identifier), patch.replacement.match.flags);
+    const openerFixture = "function openCap(e){let{onCloseCallback:c,analyticsLocations:a,...p}=e;(0,m.openModalLazy)(()=>null)}";
+    assert.match(openerFixture, match);
+    const patchedOpener = openerFixture.replace(match, patch.replacement.replace);
+    assert.notEqual(patchedOpener, openerFixture);
+
+    let joins = 0;
+    let closes = 0;
+    const openCap = runInNewContext(`(${patchedOpener})`, { $self: harness.plugin });
+    const joinThroughInviteGate = guildCount => {
+        if (guildCount >= 100) return openCap({ onCloseCallback: () => closes++ });
+        joins++;
+    };
+
+    joinThroughInviteGate(100);
+    assert.equal(harness.alerts.length, 1);
+    assert.match(harness.alerts[0].body, /maximum number of servers/);
+    assert.equal(joins, 0);
+    harness.alerts[0].onConfirm();
+    assert.equal(closes, 1);
+
+    joinThroughInviteGate(99);
+    assert.equal(harness.alerts.length, 1);
+    assert.equal(joins, 1);
 });
 
 for (const [anchor, props] of [
