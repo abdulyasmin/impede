@@ -25,15 +25,6 @@ import {
 const PLUGIN = "Impede";
 const TIMEOUT_MS = 8 * 60_000;
 
-const vencord = process.cwd();
-const pup = createRequire(join(vencord, "package.json"))("puppeteer-core");
-const plugin = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
-const theme = readFileSync(new URL("../impede.theme.css", import.meta.url), "utf8");
-
-const findArgs = extractFindArgs(plugin);
-const tokens = extractSelectorTokens(plugin, theme);
-const report = createReporterState();
-const { failures } = report;
 let browser;
 
 function stop(reason) {
@@ -41,7 +32,29 @@ function stop(reason) {
     browser?.process()?.kill("SIGKILL");
     process.exit(2);
 }
+function errorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
+}
 setTimeout(() => stop(`no result within ${TIMEOUT_MS / 60_000} minutes`), TIMEOUT_MS).unref();
+
+let pup;
+let vencord;
+let findArgs;
+let tokens;
+let report;
+let failures;
+try {
+    vencord = process.cwd();
+    pup = createRequire(join(vencord, "package.json"))("puppeteer-core");
+    const plugin = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+    const theme = readFileSync(new URL("../impede.theme.css", import.meta.url), "utf8");
+    findArgs = extractFindArgs(plugin);
+    tokens = extractSelectorTokens(plugin, theme);
+    report = createReporterState();
+    ({ failures } = report);
+} catch (err) {
+    stop(errorMessage(err));
+}
 
 // Vencord's reporter logs through console with "[Vencord]", a tag and a message,
 // the same lines scripts/generateReport.ts parses. Messages are handled in the
@@ -100,7 +113,7 @@ try {
     failures.selectors.push(...result.missing);
     await browser.close();
 } catch (err) {
-    stop(err.message);
+    stop(errorMessage(err));
 }
 
 const sections = [

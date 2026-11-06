@@ -57,6 +57,20 @@ test("fatal and completion messages finish with distinct results", () => {
     assert.deepEqual(complete, { finished: true, error: null });
 });
 
+test("missing reporter dependencies make the live reporter incomplete", t => {
+    const fixture = mkdtempSync(join(tmpdir(), "impede-reporter-empty-test-"));
+    t.after(() => rmSync(fixture, { recursive: true, force: true }));
+    const reporter = fileURLToPath(new URL("./discord_report.mjs", import.meta.url));
+
+    const result = spawnSync(process.execPath, [reporter], {
+        cwd: fixture,
+        encoding: "utf8",
+    });
+
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.match(result.stdout, /the check did not finish: Cannot find module 'puppeteer-core'/);
+});
+
 test("browser launch failures always make the live reporter incomplete", t => {
     const fixture = mkdtempSync(join(tmpdir(), "impede-reporter-test-"));
     t.after(() => rmSync(fixture, { recursive: true, force: true }));
