@@ -60,7 +60,7 @@ jobs:
           tar -xzf /tmp/pwsh.tar.gz -C /opt/tools/pwsh && chmod +x /opt/tools/pwsh/pwsh
           tar -xJf /tmp/shellcheck.tar.xz -C /opt/tools --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
           rm -f /tmp/pwsh.tar.gz /tmp/shellcheck.tar.xz
-      - run: node tests/plugin.test.mjs
+      - run: node --test tests/*.test.mjs
       - run: IMPEDE_TEST_PWSH=/opt/tools/pwsh/pwsh python3 tests/install_test.py
       - run: CHROMIUM_BIN="$(find /root/.cache/ms-playwright -name chrome-headless-shell -type f | head -1)" python3 tests/test_theme.py
       - run: /opt/tools/shellcheck install.sh

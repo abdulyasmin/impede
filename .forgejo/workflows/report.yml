@@ -9,7 +9,7 @@ on:
     - cron: "23 7 * * *"
   push:
     branches: [main]
-    paths: ['index.ts', 'impede.theme.css', 'tests/discord_report.mjs', '.forgejo/workflows/report.yml']
+    paths: ['index.ts', 'impede.theme.css', 'tests/discord_report.mjs', 'tests/discord_report_helpers.mjs', '.forgejo/workflows/report.yml']
   workflow_dispatch:
 
 concurrency:

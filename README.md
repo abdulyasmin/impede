@@ -233,13 +233,13 @@ Vencord's ESLint config requires its own GPL header on every file under `src/`, 
 Run the local regressions from this repository with Node.js 24, Python 3 and Chromium's headless shell, which `npx playwright install --only-shell chromium` downloads. On Linux, full Chrome for Testing 151 and 154 hang on the theme test's `--dump-dom`.
 
 ```sh
-node tests/plugin.test.mjs
+node --test tests/*.test.mjs
 python3 tests/install_test.py
 CHROMIUM_BIN=/path/to/chrome-headless-shell python3 tests/test_theme.py
 shellcheck install.sh
 ```
 
-The plugin tests exercise subscription changes, hook order, notice filtering and lazy module recovery. The installer tests use temporary checkouts and mock git/pnpm, including failed builds, incomplete output, concurrent updates and invalid Vesktop settings. If `pwsh` is available, they also run the portable PowerShell cases; otherwise those cases are skipped. Set `IMPEDE_TEST_PWSH=/path/to/pwsh` to choose a PowerShell executable. Windows injection and Task Scheduler still need checks on Windows.
+The Node tests exercise plugin subscription changes, hook order, notice filtering and lazy module recovery, plus the Discord reporter's parsing and compatibility classification without contacting Discord. The installer tests use temporary checkouts and mock git/pnpm, including failed builds, incomplete output, concurrent updates and invalid Vesktop settings. If `pwsh` is available, they also run the portable PowerShell cases; otherwise those cases are skipped. Set `IMPEDE_TEST_PWSH=/path/to/pwsh` to choose a PowerShell executable. Windows injection and Task Scheduler still need checks on Windows.
 
 On macOS, also run `python3 tests/macos_test.py`. It checks native launchd registration, execution, rescheduling and removal with an isolated job that only records its arguments. It also checks plist escaping, theme replacement and Vesktop settings in temporary directories. If there is no GUI login, it tests a copy of the generated plist in the user domain with a Background session type; the original GUI plist stays unchanged.
 
