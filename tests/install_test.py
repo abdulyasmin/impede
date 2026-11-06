@@ -90,8 +90,11 @@ class InstallerTests:
             if command == '--version':
                 print('11.9.0')
                 sys.exit(0)
+            call = ['pnpm', command]
+            if os.environ.get('IMPEDE_TEST_RECORD_CWD'):
+                call.append(str(pathlib.Path.cwd()))
             with open(os.environ['IMPEDE_TEST_CALLS'], 'a') as log:
-                log.write(json.dumps(['pnpm', command]) + '\\n')
+                log.write(json.dumps(call) + '\\n')
             dist = pathlib.Path('dist')
             if (dist / '.impede-build').exists():
                 sys.exit('build marker was not invalidated')
@@ -526,6 +529,26 @@ WantedBy=timers.target
 @unittest.skipUnless(PWSH, "pwsh not found; set IMPEDE_TEST_PWSH to test PowerShell")
 class PowerShellInstallerTests(InstallerTests, unittest.TestCase):
     powershell = True
+
+    def test_bracketed_checkout_path_builds_in_requested_directory(self):
+        checkout = self.base / "Vencord [test]"
+        self.checkout.rename(checkout)
+        self.checkout = checkout
+        self.plugin = checkout / "src/userplugins/impede"
+        self.dist = checkout / "dist"
+        self.marker = self.dist / ".impede-build"
+
+        for mode, options in (("plugin", ("-NoInject",)), ("update", ())):
+            with self.subTest(mode=mode):
+                if mode == "update":
+                    (self.dist / "preload.js").unlink()
+                if self.log.exists():
+                    self.log.unlink()
+                result = self.run_installer(mode, *options, IMPEDE_TEST_RECORD_CWD="1")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                pnpm_calls = [call for call in self.calls() if call[0] == "pnpm"]
+                self.assertEqual([call[1] for call in pnpm_calls], ["install", "build"])
+                self.assertEqual({call[2] for call in pnpm_calls}, {str(checkout)})
 
     def test_theme_replacement_and_temporary_file_cleanup(self):
         themes = self.base / "appdata/Vencord/themes"

@@ -285,7 +285,7 @@ function Install-Plugin {
     New-Item -ItemType Directory -Force -Path $userplugins | Out-Null
     Sync-Repo (Join-Path $userplugins "impede") $RepoUrl $MirrorUrl
 
-    Push-Location $VencordDir
+    Push-Location -LiteralPath $VencordDir
     try {
         Build-Vencord
         if ($Schedule) { Register-Update }
@@ -326,7 +326,7 @@ function Update-Plugin {
     if ((Test-BuildComplete) -and (Get-Revisions) -eq $built) {
         Say "Already up to date"
     } else {
-        Push-Location $VencordDir
+        Push-Location -LiteralPath $VencordDir
         try {
             Build-Vencord
         } finally {
