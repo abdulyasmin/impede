@@ -120,6 +120,55 @@ test("unknown notices and payment warnings remain visible", () => {
     assert.equal(plugin.filterNotice(undefined), undefined);
 });
 
+test("the notice-store patches skip promotions without hiding payment warnings", () => {
+    const { plugin } = loadPlugin();
+    const storePatch = plugin.patches.find(patch => patch.find === 'displayName="NoticeStore"');
+    const noticePatch = plugin.patches.find(patch => patch.find === ".APP_NOTICE_VIEWED,");
+    const identifier = "[A-Za-z_$][\\w$]*";
+    const apply = (fixture, patch) => {
+        if (!patch.predicate()) return fixture;
+        const { match, replace } = patch.replacement;
+        const regexp = new RegExp(match.source.replaceAll("\\i", identifier), match.flags);
+        assert.match(fixture, regexp);
+        const patched = fixture.replace(regexp, replace);
+        assert.notEqual(patched, fixture);
+        return patched;
+    };
+
+    const priorityLoop = "(function(order,notices){for(let type of order)if(null!=notices[type]&&notices[type].predicate())return notices[type]})";
+    const selectNotice = runInNewContext(apply(priorityLoop, storePatch), { $self: plugin });
+    const promotion = { type: "PREMIUM_PROMO", predicate: () => true };
+    const paymentWarning = { type: "PREMIUM_MISSING_PAYMENT", predicate: () => true };
+    const ineligibleWarning = { type: "PREMIUM_PAST_DUE_1", predicate: () => false };
+    const unknownNotice = { type: "NEW_NOTICE_TYPE", predicate: () => true };
+    const notices = {
+        PREMIUM_PROMO: promotion,
+        PREMIUM_MISSING_PAYMENT: paymentWarning,
+        PREMIUM_PAST_DUE_1: ineligibleWarning,
+        NEW_NOTICE_TYPE: unknownNotice,
+    };
+
+    assert.equal(selectNotice(["PREMIUM_PROMO", "PREMIUM_MISSING_PAYMENT"], notices), paymentWarning);
+    assert.equal(selectNotice(["PREMIUM_PAST_DUE_1"], notices), undefined);
+    assert.equal(selectNotice(["PREMIUM_PAST_DUE_1", "NEW_NOTICE_TYPE"], notices), unknownNotice);
+
+    const getNotice = "(()=>store.getNotice())";
+    const paymentResult = runInNewContext(apply(getNotice, noticePatch), {
+        $self: plugin,
+        store: { getNotice: () => paymentWarning },
+    });
+    const promotionResult = runInNewContext(apply(getNotice, noticePatch), {
+        $self: plugin,
+        store: { getNotice: () => promotion },
+    });
+    assert.equal(paymentResult(), paymentWarning);
+    assert.equal(promotionResult(), null);
+
+    plugin.settings.store.nagbars = false;
+    assert.equal(apply(priorityLoop, storePatch), priorityLoop);
+    assert.equal(apply(getNotice, noticePatch), getNotice);
+});
+
 test("collectibles are kept while the account is unknown and for full Nitro subscribers", () => {
     const harness = loadPlugin();
     const items = [{ id: "owned-decoration" }];
