@@ -100,7 +100,23 @@ try {
             try {
                 text = Array.from(sheet.cssRules, r => r.cssText).join("\n");
             } catch {
-                text = await fetch(sheet.href).then(r => r.text()).catch(() => "");
+                let response;
+                try {
+                    response = await fetch(sheet.href);
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    throw new Error(`could not fetch stylesheet ${sheet.href}: ${message}`);
+                }
+                if (!response.ok) {
+                    const status = [response.status, response.statusText].filter(Boolean).join(" ");
+                    throw new Error(`could not fetch stylesheet ${sheet.href}: HTTP ${status || "error"}`);
+                }
+                try {
+                    text = await response.text();
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    throw new Error(`could not read stylesheet ${sheet.href}: ${message}`);
+                }
             }
             for (const [, name] of text.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) classes.push(name);
         }

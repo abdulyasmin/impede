@@ -99,6 +99,93 @@ test("browser launch failures always make the live reporter incomplete", t => {
     assert.deepEqual(readFileSync(launchLog, "utf8").trim().split("\n"), ["empty-error", "string"]);
 });
 
+test("stylesheet read failures make the live reporter incomplete", t => {
+    const fixture = mkdtempSync(join(tmpdir(), "impede-reporter-stylesheet-test-"));
+    t.after(() => rmSync(fixture, { recursive: true, force: true }));
+    const moduleDir = join(fixture, "node_modules/puppeteer-core");
+    mkdirSync(moduleDir, { recursive: true });
+    mkdirSync(join(fixture, "dist"));
+    writeFileSync(join(fixture, "package.json"), '{"private":true}\n');
+    writeFileSync(join(fixture, "dist/browser.js"), "");
+    const mockPuppeteerModule = () => {
+        const finishedMessage = ["[Vencord]", "Reporter:", "Finished test"];
+        const consoleEvent = {
+            args: () => finishedMessage.map(value => ({ jsonValue: async () => value })),
+            text: () => finishedMessage.join(" "),
+        };
+        module.exports = {
+            async launch() {
+                let consoleHandler;
+                const page = {
+                    async setUserAgent() {},
+                    async setBypassCSP() {},
+                    on(type, handler) {
+                        if (type === "console") consoleHandler = handler;
+                    },
+                    async evaluateOnNewDocument() {},
+                    async goto() {
+                        consoleHandler(consoleEvent);
+                    },
+                    async evaluate(callback, ...args) {
+                        global.document = {
+                            styleSheets: [
+                                {
+                                    ownerNode: { tagName: "LINK" },
+                                    href: "https://cdn.example/readable.css",
+                                    cssRules: [{ cssText: ".readable_hash {}" }],
+                                },
+                                {
+                                    ownerNode: { tagName: "LINK" },
+                                    href: "https://cdn.example/unavailable.css",
+                                    get cssRules() {
+                                        throw new Error("cssRules unavailable");
+                                    },
+                                },
+                            ],
+                        };
+                        global.Vencord = {
+                            Webpack: { wreq: { m: { one: function moduleFactory() {} } } },
+                            WebpackPatcher: { patches: [] },
+                        };
+                        global.__impedeInspectCompatibility = () => ({ unmatched: [], missing: [] });
+                        global.fetch = () => process.env.MOCK_FETCH_RESULT === "reject"
+                            ? Promise.reject(new Error("network unavailable"))
+                            : Promise.resolve({
+                                ok: false,
+                                status: 503,
+                                statusText: "Service Unavailable",
+                                text: async () => "error page",
+                            });
+                        return callback(...args);
+                    },
+                };
+                return {
+                    newPage: async () => page,
+                    process: () => ({ kill() {} }),
+                    async close() {},
+                };
+            },
+        };
+    };
+    writeFileSync(join(moduleDir, "index.js"), "(" + mockPuppeteerModule.toString() + ")();");
+    const reporter = fileURLToPath(new URL("./discord_report.mjs", import.meta.url));
+
+    for (const [fetchResult, detail] of [
+        ["reject", /network unavailable/],
+        ["http-503", /HTTP 503 Service Unavailable/],
+    ]) {
+        const result = spawnSync(process.execPath, [reporter], {
+            cwd: fixture,
+            encoding: "utf8",
+            env: { ...process.env, MOCK_FETCH_RESULT: fetchResult },
+        });
+        assert.equal(result.status, 2, result.stdout + result.stderr);
+        assert.match(result.stdout, /the check did not finish/);
+        assert.match(result.stdout, /https:\/\/cdn\.example\/unavailable\.css/);
+        assert.match(result.stdout, detail);
+    }
+});
+
 test("selector extraction and fixture inspection cover all:true patches and composed menu ids", () => {
     const theme = `
         /* ignored .commented-out */
