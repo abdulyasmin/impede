@@ -28,6 +28,9 @@ ARTIFACTS = (
     "vencordDesktopMain.js", "vencordDesktopPreload.js",
     "vencordDesktopRenderer.js", "vencordDesktopRenderer.css",
 )
+INSTALLER_TIMEOUT = 30
+STARTUP_TIMEOUT = 30
+RELEASE_TIMEOUT = INSTALLER_TIMEOUT + 5
 
 
 class InstallerTests:
@@ -101,7 +104,8 @@ class InstallerTests:
             pause = os.environ.get('IMPEDE_TEST_PAUSE')
             if pause:
                 pathlib.Path(pause + '.ready').touch()
-                for _ in range(200):
+                deadline = time.monotonic() + float(os.environ.get('IMPEDE_TEST_RELEASE_TIMEOUT', '10'))
+                while time.monotonic() < deadline:
                     if pathlib.Path(pause + '.release').exists(): break
                     time.sleep(0.05)
                 else: sys.exit('test timed out')
@@ -139,7 +143,7 @@ class InstallerTests:
 
     def run_installer(self, *args, **extra_env):
         return subprocess.run(self.arguments(*args), env={**self.env, **extra_env},
-                              text=True, capture_output=True, timeout=30)
+                              text=True, capture_output=True, timeout=INSTALLER_TIMEOUT)
 
     def calls(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
@@ -209,27 +213,112 @@ class InstallerTests:
 
     def test_concurrent_update_is_rejected(self):
         pause = str(self.base / "pause")
-        with subprocess.Popen(self.arguments(), env={**self.env, "IMPEDE_TEST_PAUSE": pause},
+        first_env = {
+            **self.env,
+            "IMPEDE_TEST_PAUSE": pause,
+            "IMPEDE_TEST_RELEASE_TIMEOUT": str(RELEASE_TIMEOUT),
+        }
+        with subprocess.Popen(self.arguments(), env=first_env,
                               text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as first:
+            readiness_error = None
             try:
-                for _ in range(100):
+                deadline = time.monotonic() + STARTUP_TIMEOUT
+                while time.monotonic() < deadline:
                     if Path(pause + ".ready").exists():
                         break
                     if first.poll() is not None:
-                        self.fail("first updater failed: " + repr(first.communicate()))
+                        readiness_error = "first updater exited before reaching the build"
+                        break
                     time.sleep(0.05)
                 else:
-                    self.fail("first updater did not reach the build")
-                second = self.run_installer()
-                self.assertNotEqual(second.returncode, 0)
-                self.assertIn("another install/update", second.stdout + second.stderr)
+                    readiness_error = f"first updater did not reach the build within {STARTUP_TIMEOUT} seconds"
+                if readiness_error is None:
+                    second = self.run_installer()
+                    self.assertNotEqual(second.returncode, 0)
+                    self.assertIn("another install/update", second.stdout + second.stderr)
             finally:
                 Path(pause + ".release").touch()
-                stdout, stderr = first.communicate(timeout=20)
+                try:
+                    stdout, stderr = first.communicate(timeout=20)
+                except subprocess.TimeoutExpired:
+                    first.kill()
+                    stdout, stderr = first.communicate()
+                    self.fail("first updater did not exit after release\n"
+                              f"stdout:\n{stdout}\nstderr:\n{stderr}")
+            if readiness_error is not None:
+                self.fail(f"{readiness_error}\nstdout:\n{stdout}\nstderr:\n{stderr}")
             self.assertEqual(first.returncode, 0, stdout + stderr)
 
 
 class ShellInstallerTests(InstallerTests, unittest.TestCase):
+    def prepare_injection_mocks(self):
+        scripts = self.checkout / "scripts"
+        scripts.mkdir()
+        (scripts / "runInstaller.mjs").write_text("""
+            import { appendFileSync } from "node:fs";
+            appendFileSync(process.env.IMPEDE_TEST_CALLS,
+                JSON.stringify(["runInstaller", ...process.argv.slice(2)]) + "\\n");
+        """)
+        installer_dir = self.dist / "Installer"
+        installer_dir.mkdir()
+        installer = installer_dir / "VencordInstallerCli-linux"
+        installer.write_text("""#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ['IMPEDE_TEST_CALLS'], 'a') as log:
+    log.write(json.dumps([
+        'installer', *sys.argv[1:],
+        os.environ.get('VENCORD_USER_DATA_DIR'),
+        os.environ.get('VENCORD_DEV_INSTALL'),
+    ]) + '\\n')
+""")
+        installer.chmod(0o755)
+        for command in ("sudo", "doas", "run0", "pkexec"):
+            self.command(command, """
+                import json, os, sys
+                with open(os.environ['IMPEDE_TEST_CALLS'], 'a') as log:
+                    log.write(json.dumps(['unexpected elevation', *sys.argv]) + '\\n')
+                sys.exit(1)
+            """)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "shell injection fixture is Linux-only")
+    def test_explicit_discord_injection_without_controlling_terminal(self):
+        self.prepare_injection_mocks()
+        discord = self.base / "Discord without installation"
+        result = subprocess.run(
+            self.arguments("plugin", "--discord", str(discord)),
+            env=self.env,
+            text=True,
+            capture_output=True,
+            timeout=INSTALLER_TIMEOUT,
+            start_new_session=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["runInstaller", "--", "--version"], self.calls())
+        self.assertIn([
+            "installer", "--install", "--location", str(discord),
+            str(self.checkout), "1",
+        ], self.calls())
+        self.assertFalse(any(call[0] == "unexpected elevation" for call in self.calls()))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "shell injection fixture is Linux-only")
+    def test_interactive_discord_injection_requires_controlling_terminal(self):
+        self.prepare_injection_mocks()
+        result = subprocess.run(
+            self.arguments("plugin"),
+            env=self.env,
+            text=True,
+            capture_output=True,
+            timeout=INSTALLER_TIMEOUT,
+            start_new_session=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("a controlling terminal is required to choose a Discord install",
+                      result.stdout + result.stderr)
+        self.assertFalse(any(call[0] == "installer" for call in self.calls()))
+        self.assertFalse(any(call[0] == "unexpected elevation" for call in self.calls()))
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "systemd scheduling is Linux-only")
     def test_linux_schedule_reschedule_and_unschedule(self):
         checkout = self.base / 'Vencord with spaces "quotes" 100% $cash'

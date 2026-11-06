@@ -78,8 +78,13 @@ EOF
 say() { printf '==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+have_terminal() { (: </dev/tty) 2>/dev/null; }
 
 ask() {
+    if ! have_terminal; then
+        printf 'error: a controlling terminal is required to answer: %s\n' "$1" >&2
+        return 1
+    fi
     printf '%s [y/N] ' "$1"
     read -r answer </dev/tty || return 1
     case $answer in [yY]*) return 0 ;; *) return 1 ;; esac
@@ -173,8 +178,15 @@ inject() {
 
     # The same environment pnpm inject sets: patch Discord to load this checkout's dist folder.
     say "Patching Discord"
-    if VENCORD_USER_DATA_DIR="$vencord" VENCORD_DEV_INSTALL=1 "$bin" "$@" </dev/tty; then
-        return
+    if [ -n "$discord" ]; then
+        if VENCORD_USER_DATA_DIR="$vencord" VENCORD_DEV_INSTALL=1 "$bin" "$@"; then
+            return
+        fi
+    else
+        have_terminal || die "a controlling terminal is required to choose a Discord install; use --discord PATH"
+        if VENCORD_USER_DATA_DIR="$vencord" VENCORD_DEV_INSTALL=1 "$bin" "$@" </dev/tty; then
+            return
+        fi
     fi
 
     if [ "$OS" = linux ] && [ "$(id -u)" -ne 0 ] &&
