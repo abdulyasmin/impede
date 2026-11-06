@@ -14,6 +14,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -110,6 +111,14 @@ class InstallerTests:
                 if artifact == 'preload.js' and os.environ.get('IMPEDE_TEST_INCOMPLETE'):
                     continue
                 (dist / artifact).write_text('new ' + artifact)
+        """)
+        self.command("systemctl", """
+            import json, os, sys
+            args = sys.argv[1:]
+            with open(os.environ['IMPEDE_TEST_CALLS'], 'a') as log:
+                log.write(json.dumps(['systemctl', *args]) + '\\n')
+            if args == ['--user', 'show-environment'] and os.environ.get('IMPEDE_TEST_SYSTEMD_UNAVAILABLE'):
+                sys.exit(1)
         """)
 
     def command(self, name, source):
@@ -221,6 +230,118 @@ class InstallerTests:
 
 
 class ShellInstallerTests(InstallerTests, unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith("linux"), "systemd scheduling is Linux-only")
+    def test_linux_schedule_reschedule_and_unschedule(self):
+        checkout = self.base / 'Vencord with spaces "quotes" 100% $cash'
+        self.checkout.rename(checkout)
+        self.checkout = checkout
+        self.plugin = checkout / "src/userplugins/impede"
+        self.dist = checkout / "dist"
+        self.marker = self.dist / ".impede-build"
+        self.marker.write_text("new-vencord\nnew-impede\n")
+
+        result = self.run_installer("update", "--schedule")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        unit_dir = Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user"
+        service = unit_dir / "impede-update.service"
+        timer = unit_dir / "impede-update.timer"
+        node_dir = subprocess.check_output(
+            ["node", "-p", 'require("path").dirname(process.execPath)'],
+            env=self.env,
+            text=True,
+        ).strip()
+
+        def unit_escape(value):
+            return value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+
+        def exec_escape(value):
+            return unit_escape(value).replace("$", "$$")
+
+        expected_path = node_dir + os.pathsep + self.env["PATH"]
+        expected_service = f'''[Unit]
+Description=Update impede and Vencord, and rebuild Vencord
+
+[Service]
+Type=oneshot
+Environment="PATH={unit_escape(expected_path)}"
+ExecStart=/bin/sh "{exec_escape(str(self.plugin / "install.sh"))}" update --vencord-dir "{exec_escape(str(checkout))}"
+'''
+        expected_timer = '''[Unit]
+Description=Update impede every day
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+'''
+        self.assertEqual(service.read_text(), expected_service)
+        self.assertEqual(timer.read_text(), expected_timer)
+        self.assertEqual(expected_path.split(os.pathsep)[0], node_dir)
+        systemctl_calls = [call for call in self.calls() if call[0] == "systemctl"]
+        self.assertEqual(systemctl_calls, [
+            ["systemctl", "--user", "show-environment"],
+            ["systemctl", "--user", "daemon-reload"],
+            ["systemctl", "--user", "enable", "--now", "impede-update.timer"],
+        ])
+
+        service.write_text("stale service\n")
+        timer.write_text("stale timer\n")
+        call_offset = len(self.calls())
+        result = self.run_installer("update", "--schedule")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(service.read_text(), expected_service)
+        self.assertEqual(timer.read_text(), expected_timer)
+        new_calls = self.calls()[call_offset:]
+        self.assertEqual([call for call in new_calls if call[0] == "systemctl"], [
+            ["systemctl", "--user", "show-environment"],
+            ["systemctl", "--user", "daemon-reload"],
+            ["systemctl", "--user", "enable", "--now", "impede-update.timer"],
+        ])
+
+        result = self.run_installer("update", "--unschedule")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(service.exists())
+        self.assertFalse(timer.exists())
+        systemctl_calls = [call for call in self.calls() if call[0] == "systemctl"]
+        self.assertEqual(systemctl_calls[-2:], [
+            ["systemctl", "--user", "disable", "--now", "impede-update.timer"],
+            ["systemctl", "--user", "daemon-reload"],
+        ])
+
+        call_count = len(systemctl_calls)
+        result = self.run_installer("update", "--unschedule")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("No update is scheduled", result.stdout)
+        self.assertEqual(len([call for call in self.calls() if call[0] == "systemctl"]), call_count)
+
+        result = self.run_installer("update", "--schedule", IMPEDE_TEST_SYSTEMD_UNAVAILABLE="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("scheduling needs systemd", result.stdout + result.stderr)
+        self.assertFalse(service.exists())
+        self.assertFalse(timer.exists())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "systemd scheduling is Linux-only")
+    def test_linux_schedule_rejects_newlines_before_writing_units(self):
+        checkout = self.base / "Vencord with\nnewline"
+        self.checkout.rename(checkout)
+        self.checkout = checkout
+        self.plugin = checkout / "src/userplugins/impede"
+        self.dist = checkout / "dist"
+        self.marker = self.dist / ".impede-build"
+        self.marker.write_text("new-vencord\nnew-impede\n")
+
+        result = self.run_installer("update", "--schedule")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("paths containing newlines", result.stdout + result.stderr)
+        unit_dir = Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user"
+        self.assertFalse((unit_dir / "impede-update.service").exists())
+        self.assertFalse((unit_dir / "impede-update.timer").exists())
+        self.assertFalse(any(call[0] == "systemctl" for call in self.calls()))
+
     def test_directory_is_not_accepted_as_a_build_output(self):
         self.marker.write_text("new-vencord\nnew-impede\n")
         output = self.dist / "preload.js"
