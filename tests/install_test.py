@@ -414,6 +414,37 @@ WantedBy=timers.target
         self.assertFalse(timer.exists())
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "systemd scheduling is Linux-only")
+    def test_failed_reschedule_preserves_existing_units(self):
+        self.marker.write_text("new-vencord\nnew-impede\n")
+        result = self.run_installer("update", "--schedule")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        unit_dir = Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user"
+        service = unit_dir / "impede-update.service"
+        timer = unit_dir / "impede-update.timer"
+        installed = {path: path.read_bytes() for path in (service, timer)}
+        self.command("cat", """
+            import pathlib, sys
+            if len(sys.argv) > 1:
+                sys.stdout.buffer.write(pathlib.Path(sys.argv[1]).read_bytes())
+                sys.exit(0)
+            sys.stdout.write("partial definition\\n")
+            sys.exit(23)
+        """)
+        call_offset = len(self.calls())
+
+        result = self.run_installer("update", "--schedule")
+
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual({path: path.read_bytes() for path in (service, timer)}, installed)
+        self.assertEqual(set(unit_dir.iterdir()), set(installed))
+        systemctl_calls = [call for call in self.calls()[call_offset:]
+                           if call[0] == "systemctl"]
+        self.assertEqual(systemctl_calls, [
+            ["systemctl", "--user", "show-environment"],
+        ])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "systemd scheduling is Linux-only")
     def test_linux_schedule_rejects_newlines_before_writing_units(self):
         checkout = self.base / "Vencord with\nnewline"
         self.checkout.rename(checkout)

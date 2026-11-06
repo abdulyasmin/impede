@@ -20,7 +20,8 @@ AGENT_PLIST=$HOME/Library/LaunchAgents/$AGENT_LABEL.plist
 
 # setup_pnpm puts a temporary shim on PATH, which the scheduled job must not inherit.
 ORIG_PATH=$PATH
-shim="" src="" theme_tmp="" update_lock="" build_backup="" build_pending=0
+shim="" src="" theme_tmp="" service_tmp="" timer_tmp="" agent_tmp=""
+update_lock="" build_backup="" build_pending=0
 
 # shellcheck disable=SC2329 # Invoked by the EXIT trap.
 cleanup() {
@@ -39,6 +40,9 @@ cleanup() {
     [ -z "$shim" ] || rm -rf "$shim"
     [ -z "$src" ] || rm -f "$src"
     [ -z "$theme_tmp" ] || rm -f "$theme_tmp"
+    [ -z "$service_tmp" ] || rm -f "$service_tmp"
+    [ -z "$timer_tmp" ] || rm -f "$timer_tmp"
+    [ -z "$agent_tmp" ] || rm -f "$agent_tmp"
     [ -z "$update_lock" ] || rmdir "$update_lock"
     exit "$status"
 }
@@ -298,7 +302,9 @@ schedule_updates() {
                 die "scheduling needs systemd; have cron run sh \"$script\" update --vencord-dir \"$vencord\" instead"
             fi
             mkdir -p "$UNIT_DIR"
-            cat >"$UNIT_DIR/impede-update.service" <<EOF
+            service_tmp=$(mktemp "$UNIT_DIR/.impede-update.service.XXXXXX")
+            timer_tmp=$(mktemp "$UNIT_DIR/.impede-update.timer.XXXXXX")
+            cat >"$service_tmp" <<EOF
 [Unit]
 Description=Update impede and Vencord, and rebuild Vencord
 
@@ -307,7 +313,7 @@ Type=oneshot
 Environment="PATH=$(unit_escape "$path")"
 ExecStart=/bin/sh "$(exec_escape "$script")" update --vencord-dir "$(exec_escape "$vencord")"
 EOF
-            cat >"$UNIT_DIR/impede-update.timer" <<EOF
+            cat >"$timer_tmp" <<EOF
 [Unit]
 Description=Update impede every day
 
@@ -319,6 +325,10 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOF
+            mv -f "$service_tmp" "$UNIT_DIR/impede-update.service"
+            service_tmp=""
+            mv -f "$timer_tmp" "$UNIT_DIR/impede-update.timer"
+            timer_tmp=""
             systemctl --user daemon-reload
             systemctl --user enable --now impede-update.timer
             say "Scheduled a daily update with the systemd timer impede-update.timer."
@@ -327,7 +337,8 @@ EOF
         mac)
             log="$HOME/Library/Logs/impede-update.log"
             mkdir -p "$(dirname "$AGENT_PLIST")" "$(dirname "$log")"
-            cat >"$AGENT_PLIST" <<EOF
+            agent_tmp=$(mktemp "$AGENT_PLIST.XXXXXX")
+            cat >"$agent_tmp" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -363,6 +374,8 @@ EOF
 </dict>
 </plist>
 EOF
+            mv -f "$agent_tmp" "$AGENT_PLIST"
+            agent_tmp=""
             launchctl bootout "gui/$(id -u)/$AGENT_LABEL" 2>/dev/null || true
             launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST"
             say "Scheduled an update at login and every day at noon with the launch agent $AGENT_LABEL."
