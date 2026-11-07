@@ -62,6 +62,20 @@ jobs:
           rm -f /tmp/pwsh.tar.gz /tmp/shellcheck.tar.xz
       - run: node --test tests/*.test.mjs
       - run: IMPEDE_TEST_PWSH=/opt/tools/pwsh/pwsh python3 tests/install_test.py
+      - name: Verify theme staging preserves installed copies
+        run: |
+          useradd --create-home --shell /bin/sh impede-test
+          chmod -R a+rX .
+          output=$(mktemp)
+          if ! runuser -u impede-test -- env IMPEDE_TEST_PWSH=/opt/tools/pwsh/pwsh python3 tests/install_test.py PowerShellInstallerTests.test_theme_staging_failure_preserves_existing_copy >"$output" 2>&1; then
+            cat "$output"
+            exit 1
+          fi
+          cat "$output"
+          if grep -qi skipped "$output"; then
+            echo "the theme staging preservation test was skipped" >&2
+            exit 1
+          fi
       - run: CHROMIUM_BIN="$(find /root/.cache/ms-playwright -name chrome-headless-shell -type f | head -1)" python3 tests/test_theme.py
       - run: /opt/tools/shellcheck install.sh
 

@@ -595,5 +595,18 @@ class PowerShellInstallerTests(InstallerTests, unittest.TestCase):
         self.assertFalse(list(state.parent.glob("state.json.*.tmp")))
 
 
+class CIConfigurationTests(unittest.TestCase):
+    def test_theme_staging_failure_runs_unskipped_as_an_unprivileged_user(self):
+        workflow = (ROOT / ".forgejo/workflows/ci.yml").read_text()
+        command = ("runuser -u impede-test -- env IMPEDE_TEST_PWSH=/opt/tools/pwsh/pwsh "
+                   "python3 tests/install_test.py "
+                   "PowerShellInstallerTests.test_theme_staging_failure_preserves_existing_copy")
+
+        self.assertIn("useradd --create-home --shell /bin/sh impede-test", workflow)
+        self.assertIn("chmod -R a+rX .", workflow)
+        self.assertIn(command, workflow)
+        self.assertIn("grep -qi skipped", workflow)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
