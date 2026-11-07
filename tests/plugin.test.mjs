@@ -68,6 +68,19 @@ function loadPlugin() {
     };
 }
 
+function applyPatch(fixture, patch) {
+    if (patch.predicate && !patch.predicate()) return fixture;
+    const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
+    return replacements.reduce((patched, replacement) => {
+        if (replacement.predicate && !replacement.predicate()) return patched;
+        const match = new RegExp(replacement.match.source.replaceAll("\\i", "[A-Za-z_$][\\w$]*"), replacement.match.flags);
+        assert.match(patched, match);
+        const result = patched.replace(match, replacement.replace);
+        assert.notEqual(result, patched);
+        return result;
+    }, fixture);
+}
+
 test("subscription changes immediately restore controls and stopping removes the listener", () => {
     const harness = loadPlugin();
     harness.plugin.start();
@@ -127,19 +140,9 @@ test("the notice-store patches skip promotions without hiding payment warnings",
     const { plugin } = loadPlugin();
     const storePatch = plugin.patches.find(patch => patch.find === 'displayName="NoticeStore"');
     const noticePatch = plugin.patches.find(patch => patch.find === ".APP_NOTICE_VIEWED,");
-    const identifier = "[A-Za-z_$][\\w$]*";
-    const apply = (fixture, patch) => {
-        if (!patch.predicate()) return fixture;
-        const { match, replace } = patch.replacement;
-        const regexp = new RegExp(match.source.replaceAll("\\i", identifier), match.flags);
-        assert.match(fixture, regexp);
-        const patched = fixture.replace(regexp, replace);
-        assert.notEqual(patched, fixture);
-        return patched;
-    };
 
     const priorityLoop = "(function(order,notices){for(let type of order)if(null!=notices[type]&&notices[type].predicate())return notices[type]})";
-    const selectNotice = runInNewContext(apply(priorityLoop, storePatch), { $self: plugin });
+    const selectNotice = runInNewContext(applyPatch(priorityLoop, storePatch), { $self: plugin });
     const promotion = { type: "PREMIUM_PROMO", predicate: () => true };
     const paymentWarning = { type: "PREMIUM_MISSING_PAYMENT", predicate: () => true };
     const ineligibleWarning = { type: "PREMIUM_PAST_DUE_1", predicate: () => false };
@@ -156,11 +159,11 @@ test("the notice-store patches skip promotions without hiding payment warnings",
     assert.equal(selectNotice(["PREMIUM_PAST_DUE_1", "NEW_NOTICE_TYPE"], notices), unknownNotice);
 
     const getNotice = "(()=>store.getNotice())";
-    const paymentResult = runInNewContext(apply(getNotice, noticePatch), {
+    const paymentResult = runInNewContext(applyPatch(getNotice, noticePatch), {
         $self: plugin,
         store: { getNotice: () => paymentWarning },
     });
-    const promotionResult = runInNewContext(apply(getNotice, noticePatch), {
+    const promotionResult = runInNewContext(applyPatch(getNotice, noticePatch), {
         $self: plugin,
         store: { getNotice: () => promotion },
     });
@@ -168,8 +171,8 @@ test("the notice-store patches skip promotions without hiding payment warnings",
     assert.equal(promotionResult(), null);
 
     plugin.settings.store.nagbars = false;
-    assert.equal(apply(priorityLoop, storePatch), priorityLoop);
-    assert.equal(apply(getNotice, noticePatch), getNotice);
+    assert.equal(applyPatch(priorityLoop, storePatch), priorityLoop);
+    assert.equal(applyPatch(getNotice, noticePatch), getNotice);
 });
 
 test("collectibles are kept while the account is unknown and for full Nitro subscribers", () => {
@@ -200,10 +203,8 @@ test("the server context-menu patch keeps unrelated actions", () => {
 test("the roadblock patch preserves subscriber actions", () => {
     const harness = loadPlugin();
     const patch = harness.plugin.patches.find(patch => patch.find === '?"free_trial":');
-    const match = new RegExp(patch.replacement.match.source.replaceAll("\\i", "[A-Za-z_$][\\w$]*"));
     const fixture = '[{text:"close"},{text:a,variant:"expressive",size:"md",onClick:async e=>{await c(),d(e)},icon:i.x}]';
-    const patched = fixture.replace(match, patch.replacement.replace);
-    assert.notEqual(patched, fixture);
+    const patched = applyPatch(fixture, patch);
     const render = () => runInNewContext(patched, { $self: harness.plugin, a: "Nitro", i: { x: "icon" } });
     assert.equal(render().length, 2);
     harness.setUser({ premiumType: 0 });
@@ -248,12 +249,10 @@ for (const [anchor, props] of [
 ]) {
     test(`the subscribe component keeps its hooks when subscription changes (${anchor})`, () => {
         const harness = loadPlugin();
-        const { replacement } = harness.plugin.patches.find(patch => patch.find === anchor);
-        const match = new RegExp(replacement.match.source.replaceAll("\\i", "[A-Za-z_$][\\w$]*"));
+        const patch = harness.plugin.patches.find(patch => patch.find === anchor);
         // Both current subscribe components call hooks before this outer render return.
         const fixture = `let Button=function(e){let{${props}}=e;hook();hook();return(0,i.jsx)(r.A,{onClick:n,subscriptionTier:t,postSuccessGuild:g,children:()=>null})};Button`;
-        const patched = fixture.replace(match, replacement.replace);
-        assert.notEqual(patched, fixture);
+        const patched = applyPatch(fixture, patch);
         let hookCalls = 0;
         const render = runInNewContext(patched, {
             $self: harness.plugin,
@@ -270,3 +269,44 @@ for (const [anchor, props] of [
         }
     });
 }
+
+test("subscribeButtons controls activation of all three patches", () => {
+    const harness = loadPlugin();
+    const subscribeFixture = props => `let Button=function(e){let{${props}}=e;return(0,i.jsx)(r.A,{onClick:n,subscriptionTier:t,postSuccessGuild:g,children:()=>null})};Button`;
+    const renderSubscribe = source => runInNewContext(source, {
+        $self: harness.plugin,
+        i: { jsx: (_, props) => props },
+        r: { A: "SubscribeButton" },
+    })({ subscriptionTier: 2 });
+    const fixtures = [
+        {
+            patch: harness.plugin.patches.find(patch => patch.find === '"buttonShineClassName"in'),
+            source: subscribeFixture("subscriptionTier:t,onClick:n,size:a,postSuccessGuild:g"),
+            assertRemoved: source => assert.equal(renderSubscribe(source), null),
+        },
+        {
+            patch: harness.plugin.patches.find(patch => patch.find === ".disabled||!0==="),
+            source: subscribeFixture("subscriptionTier:t,onClick:n,postSuccessGuild:g"),
+            assertRemoved: source => assert.equal(renderSubscribe(source), null),
+        },
+        {
+            patch: harness.plugin.patches.find(patch => patch.find === '?"free_trial":'),
+            source: '[{text:"close"},{text:a,variant:"expressive",size:"md",onClick:async e=>{await c(),d(e)},icon:i.x}]',
+            assertRemoved: source => assert.equal(
+                runInNewContext(source, { $self: harness.plugin, a: "Nitro", i: { x: "icon" } }).length,
+                1,
+            ),
+        },
+    ];
+
+    harness.setUser({ premiumType: 0 });
+    for (const { patch, source, assertRemoved } of fixtures) {
+        const patched = applyPatch(source, patch);
+        assert.notEqual(patched, source);
+        assertRemoved(patched);
+    }
+
+    harness.plugin.settings.store.subscribeButtons = false;
+    for (const { patch, source } of fixtures)
+        assert.equal(applyPatch(source, patch), source);
+});
