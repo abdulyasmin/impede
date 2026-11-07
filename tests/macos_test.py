@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 
@@ -109,10 +110,25 @@ exit $?
     harness.write_text(source)
     for filename in ("impede.theme.css", "impede.online.theme.css"):
         shutil.copyfile(repo / filename, base / filename)
-    # launchd runs this stub, which only records its arguments and PATH.
+    # launchd runs this stub, which only records its arguments and PATH. Publish the
+    # result only after its contents are complete: launchd can terminate an old job
+    # while the replacement is starting.
     stub = plugin / "install.sh"
-    record = "const fs=require('fs');fs.writeFileSync(process.argv[1],JSON.stringify({argv:process.argv.slice(2),path:process.env.PATH}));"
-    stub.write_text("#!/bin/sh\nexec " + shlex.quote(node) + " -e " + shlex.quote(record) + " " + shlex.quote(str(result)) + ' "$@"\n')
+    record = """const fs=require('fs');
+const result=process.env.IMPEDE_TEST_RESULT_PATH||process.argv[1],temp=result+'.'+process.pid+'.tmp';
+const output=JSON.stringify({argv:process.argv.slice(2),path:process.env.PATH});
+const handle=fs.openSync(temp,'w');
+try {
+    if (process.env.IMPEDE_TEST_RESULT_READY) {
+        fs.writeFileSync(process.env.IMPEDE_TEST_RESULT_READY,'');
+        while (!fs.existsSync(process.env.IMPEDE_TEST_RESULT_RELEASE))
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);
+    }
+    fs.writeFileSync(handle,output);
+} finally { fs.closeSync(handle); }
+fs.renameSync(temp,result);"""
+    stub.write_text("#!/bin/sh\nexec " + shlex.quote(node) + " -e " + shlex.quote(record) + " " +
+                    shlex.quote(str(result)) + ' "$@"\n')
     stub.chmod(0o755)
 
     def run(*args, success=True):
@@ -133,14 +149,53 @@ exit $?
             raise AssertionError("\n".join(diagnostics))
         return completed
 
-    def wait_result():
+    def wait_result(path=result):
         deadline = time.monotonic() + 10
-        while not result.exists() and time.monotonic() < deadline:
+        while not path.exists() and time.monotonic() < deadline:
             time.sleep(0.1)
-        check("scheduled stub ran", result.exists())
-        return json.loads(result.read_text())
+        check("scheduled stub ran", path.exists())
+        return json.loads(path.read_text())
+
+    def test_scheduled_result_is_published_atomically():
+        delayed_result = base / "delayed-scheduled-result.json"
+        ready = base / "writer-ready"
+        release = base / "writer-release"
+        writer = subprocess.Popen(
+            [str(stub), "update", "--vencord-dir", str(checkout)],
+            env={**env, "IMPEDE_TEST_RESULT_PATH": str(delayed_result),
+                 "IMPEDE_TEST_RESULT_READY": str(ready),
+                 "IMPEDE_TEST_RESULT_RELEASE": str(release)},
+        )
+        deadline = time.monotonic() + 10
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        try:
+            check("delayed scheduled stub opened its temporary result", ready.exists())
+            # The writer has opened its temporary file but has not written JSON. A direct
+            # destination write would make wait_result parse that incomplete file here.
+            release_writer = threading.Timer(0.2, release.touch)
+            release_writer.start()
+            try:
+                recorded = wait_result(delayed_result)
+            finally:
+                release_writer.cancel()
+                release.touch()
+            writer.wait(timeout=10)
+            check("test_scheduled_result_is_published_atomically",
+                  writer.returncode == 0
+                  and recorded["argv"] == ["update", "--vencord-dir", str(checkout)]
+                  and recorded["path"] == env["PATH"])
+        finally:
+            release.touch()
+            if writer.poll() is None:
+                try:
+                    writer.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    writer.kill()
+                    writer.wait()
 
     try:
+        test_scheduled_result_is_published_atomically()
         run("schedule")
         parsed = plistlib.loads(plist.read_bytes())
         check("plist parses with Apple plutil", subprocess.run(["plutil", "-lint", str(plist)], capture_output=True).returncode == 0)
