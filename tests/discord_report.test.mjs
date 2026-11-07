@@ -71,12 +71,76 @@ test("missing reporter dependencies make the live reporter incomplete", t => {
     assert.match(result.stdout, /the check did not finish: Cannot find module 'puppeteer-core'/);
 });
 
+test("live reporter rejects a bundle without Impede", t => {
+    const fixture = mkdtempSync(join(tmpdir(), "impede-reporter-no-plugin-test-"));
+    t.after(() => rmSync(fixture, { recursive: true, force: true }));
+    const moduleDir = join(fixture, "node_modules/puppeteer-core");
+    mkdirSync(moduleDir, { recursive: true });
+    mkdirSync(join(fixture, "dist"));
+    writeFileSync(join(fixture, "package.json"), '{"private":true}\n');
+    writeFileSync(join(fixture, "dist/browser.js"), "// Impede was expected here\n");
+    writeFileSync(join(moduleDir, "index.js"), `
+        const finishedMessage = ["[Vencord]", "Reporter:", "Finished test"];
+        const consoleEvent = {
+            args: () => finishedMessage.map(value => ({ jsonValue: async () => value })),
+            text: () => finishedMessage.join(" "),
+        };
+        module.exports = {
+            async launch() {
+                let consoleHandler;
+                const page = {
+                    async setUserAgent() {},
+                    async setBypassCSP() {},
+                    on(type, handler) {
+                        if (type === "console") consoleHandler = handler;
+                    },
+                    async evaluateOnNewDocument() {},
+                    async goto() {
+                        consoleHandler(consoleEvent);
+                    },
+                    async evaluate(callback, ...args) {
+                        global.document = {
+                            styleSheets: [{
+                                ownerNode: { tagName: "LINK" },
+                                cssRules: [{ cssText: ".matching-token {}" }],
+                            }],
+                        };
+                        global.Vencord = {
+                            Plugins: { plugins: {} },
+                            Webpack: { wreq: { m: { one: function moduleFactory() {} } } },
+                            WebpackPatcher: { patches: [] },
+                        };
+                        global.__impedeInspectCompatibility = () => ({ unmatched: [], missing: [] });
+                        return callback(...args);
+                    },
+                };
+                return {
+                    newPage: async () => page,
+                    process: () => ({ kill() {} }),
+                    async close() {},
+                };
+            },
+        };
+    `);
+    const reporter = fileURLToPath(new URL("./discord_report.mjs", import.meta.url));
+
+    const result = spawnSync(process.execPath, [reporter], {
+        cwd: fixture,
+        encoding: "utf8",
+    });
+
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.match(result.stdout, /the check did not finish: Impede is missing from Vencord's plugin registry/);
+});
+
 test("browser launch failures always make the live reporter incomplete", t => {
     const fixture = mkdtempSync(join(tmpdir(), "impede-reporter-test-"));
     t.after(() => rmSync(fixture, { recursive: true, force: true }));
     const moduleDir = join(fixture, "node_modules/puppeteer-core");
     mkdirSync(moduleDir, { recursive: true });
+    mkdirSync(join(fixture, "dist"));
     writeFileSync(join(fixture, "package.json"), '{"private":true}\n');
+    writeFileSync(join(fixture, "dist/browser.js"), "// Impede\n");
     writeFileSync(join(moduleDir, "index.js"), `
         const { appendFileSync } = require("node:fs");
         module.exports = { launch() {
@@ -106,7 +170,7 @@ test("stylesheet read failures make the live reporter incomplete", t => {
     mkdirSync(moduleDir, { recursive: true });
     mkdirSync(join(fixture, "dist"));
     writeFileSync(join(fixture, "package.json"), '{"private":true}\n');
-    writeFileSync(join(fixture, "dist/browser.js"), "");
+    writeFileSync(join(fixture, "dist/browser.js"), "// Impede\n");
     const mockPuppeteerModule = () => {
         const finishedMessage = ["[Vencord]", "Reporter:", "Finished test"];
         const consoleEvent = {
@@ -144,6 +208,7 @@ test("stylesheet read failures make the live reporter incomplete", t => {
                             ],
                         };
                         global.Vencord = {
+                            Plugins: { plugins: { Impede: {} } },
                             Webpack: { wreq: { m: { one: function moduleFactory() {} } } },
                             WebpackPatcher: { patches: [] },
                         };

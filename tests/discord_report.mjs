@@ -43,6 +43,7 @@ let findArgs;
 let tokens;
 let report;
 let failures;
+let browserBundle;
 try {
     vencord = process.cwd();
     pup = createRequire(join(vencord, "package.json"))("puppeteer-core");
@@ -52,6 +53,8 @@ try {
     tokens = extractSelectorTokens(plugin, theme);
     report = createReporterState();
     ({ failures } = report);
+    browserBundle = readFileSync(join(vencord, "dist/browser.js"), "utf8");
+    if (!browserBundle.includes(PLUGIN)) stop(`the browser bundle does not contain ${PLUGIN}`);
 } catch (err) {
     stop(errorMessage(err));
 }
@@ -80,7 +83,7 @@ try {
     await page.evaluateOnNewDocument(`
         globalThis.__impedeInspectCompatibility = ${inspectCompatibility.toString()};
         if (location.host.endsWith("discord.com")) {
-            ${readFileSync(join(vencord, "dist/browser.js"), "utf8")};
+            ${browserBundle};
         }
     `);
     await page.goto("https://discord.com/login", { timeout: 120_000 });
@@ -91,6 +94,9 @@ try {
     // The reporter has loaded every lazy chunk, so the page holds all of
     // Discord's stylesheets and module factories.
     const result = await page.evaluate(async (pluginName, tokens) => {
+        const plugins = Vencord.Plugins?.plugins;
+        const plugin = plugins instanceof Map ? plugins.get(pluginName) : plugins?.[pluginName];
+        if (!plugin) return { error: `${pluginName} is missing from Vencord's plugin registry` };
         const { wreq } = Vencord.Webpack;
         const modules = Object.values(wreq.m).map(String);
         const classes = [];
