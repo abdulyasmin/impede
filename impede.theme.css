@@ -83,7 +83,7 @@ li:has(> div > a[href="/shop"]) {
 }
 
 /* Partner outbound promotion; build-specific hash, so this stops matching when Discord changes it */
-[class*="notice_"][class*="colorPremium"]:has(> [class*="premiumIcon__7b750"]):not(
+[class*="notice_"][class*="colorPremium"]:has(> [class*="premiumIcon_uc7PyD"]):not(
     [class*="colorWarning"], [class*="colorDanger"]
 ) {
     display: none !important;

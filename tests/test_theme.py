@@ -67,7 +67,7 @@ for (const suffix of ["_abc123", "__abc123"]) {
                 `<div data-target class="${c("notice")} ${c("colorPremium")} ${c(color)}"><div class="${c(content)}">Fix payment</div></div>`, false);
         }
         fixture(`partner icon in warning ${suffix} ${color}`,
-            `<div data-target class="${c("notice")} ${c("colorPremium")} ${c(color)}"><div class="premiumIcon__7b750">Fix payment</div></div>`, false);
+            `<div data-target class="${c("notice")} ${c("colorPremium")} ${c(color)}"><div class="premiumIcon_uc7PyD">Fix payment</div></div>`, false);
     }
     for (const wrap of [false, true]) {
         const icon = `<svg class="${c("premiumIcon")}"></svg>`;

@@ -7,7 +7,7 @@
 // Patches P1, P2, P5 and P8 are adapted from Equicord's Declutter, P10-P14 from Equicord's
 // Questify, and P9 from Vencord's CharacterCounter. Those projects are GPL-3.0-or-later;
 // AGPL-3.0 section 13 permits the combination, and the adapted parts stay under the GPL.
-// Every patch was checked against Discord stable build 647615 (2026-10-23).
+// Every patch was checked against Discord stable build 667580 (2026-11-08).
 
 import { findGroupChildrenByChildId } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
@@ -265,8 +265,8 @@ export default definePlugin({
             find: 'displayName="NoticeStore"',
             predicate: () => settings.store.nagbars,
             replacement: {
-                match: /for\(let (\i) of \i\)if\((?=null!=(\i)\[\1\]&&\2\[\1\]\.predicate\()/,
-                replace: "$&!$self.isPromoNotice($1)&&",
+                match: /(?<=if\(null==(\i)\[(\i)\]\)continue;)(?=if\(\1\[\2\]\.predicate\()/,
+                replace: "if($self.isPromoNotice($2))continue;",
             },
         },
         {
@@ -304,7 +304,7 @@ export default definePlugin({
             find: "GLOBAL_DISCOVERY_SIDEBAR},",
             predicate: () => settings.store.discoverQuests,
             // Discord drops the tab itself when an experiment is on; force that branch.
-            replacement: { match: /location:"GlobalDiscoverySidebar"\}\)\.enabled(?=\?\i\.GLOBAL_DISCOVERY_TABS\.filter\()/, replace: "$&||!0" },
+            replacement: { match: /location:"GlobalDiscoverySidebar"\}\)\.enabled(?=,.{0,80}?\.filter\(\i=>\(\i!==\i\.GlobalDiscoveryTab\.QUESTS\|\|!\i\))/, replace: "$&||!0" },
         },
         // P11: Active Now quest promo
         {
@@ -334,7 +334,7 @@ export default definePlugin({
             predicate: () => settings.store.blockQuestFetch,
             replacement: [
                 { match: /(?<=if\(\i\.\i\.isFetchingCurrentQuests)/, replace: "||true" },
-                { match: /(?=let \i=Date\.now\(\);\i\.recordQuestRequestAttempt.{0,50}QUESTS_FETCH_QUEST_TO_DELIVER_BEGIN)/, replace: "return;" },
+                { match: /(?=let \i=Date\.now\(\),\i=\i\.recordQuestRequestAttempt.{0,50}QUESTS_FETCH_QUEST_TO_DELIVER_BEGIN)/, replace: "return;" },
             ],
         },
 
@@ -433,7 +433,7 @@ export default definePlugin({
             predicate: () => settings.store.expressionUpsells,
             replacement: [
                 {
-                    match: /\i(?=\?null:\(0,\i\.jsx\)\("div",\{className:\i\(\)\(\i\.\i,\i\.\i\),children:\(0,\i\.jsxs\)\("div",\{children:\[\(0,\i\.jsx\)\(\i\.\i,\{variant:"text-sm\/normal","aria-label":"super reaction tooltip upsell")/,
+                    match: /\i(?=\?null:\(0,\i\.jsx\)\("div",\{className:\i\(\)\(\i\.\i,\i\.\i\),children:\(0,\i\.jsxs\)\("div",\{children:\[\(0,\i\.jsx\)\(\i\.\i,\{variant:"[^"]+","aria-label":"super reaction tooltip upsell")/,
                     replace: "!0",
                 },
                 { match: /(?<=if\(\i&&!\i\)return void)\(0,\i\.\i\)(?=\(\{analytics:\{type:\i\.\i\.BURST_REACTION_UPSELL)/, replace: "(()=>{})" },
@@ -469,7 +469,7 @@ export default definePlugin({
         },
         // P22: soundboard picker: sections of sounds you need Nitro to use
         {
-            find: 'location:"useSoundGrid"',
+            find: '"Invalid - SoundboardSoundGrid"',
             predicate: () => settings.store.lockedEmoji,
             replacement: {
                 match: /(\i)\.filter\((\i)=>\2\.items\.length>0\)(?=,\[\1\]\),\i=\i\.useMemo\(\(\)=>\i\.findLastIndex\()/,
@@ -486,11 +486,11 @@ export default definePlugin({
         {
             find: "let{showUpsell:",
             predicate: () => settings.store.expressionUpsells,
-            replacement: { match: /(?<=function \i\(\i\)\{)(?=let\{showUpsell:\i,text:\i,textVariant:)/, replace: "return null;" },
+            replacement: { match: /(?<=function(?: \i)?\(\i\)\{)(?=let\{showUpsell:\i,text:\i,textVariant:)/, replace: "return null;" },
         },
         // P25: soundboard quick access: the locked slot
         {
-            find: "useFavoriteAndFrequentlyUsedSounds",
+            find: "unlockedFavoritesAndFrequentlyUsedSounds",
             predicate: () => settings.store.expressionUpsells,
             replacement: [
                 { match: /(?<=let )(\i)=(\i)\.length>0\?\2\[0\]:null(?=,\i=null!=\1)/, replace: "$1=null" },
@@ -508,7 +508,7 @@ export default definePlugin({
             find: "#{intl::CALL_SOUNDS_UPSELL_DESCRIPTION_NON_SUB}",
             predicate: () => settings.store.expressionUpsells,
             replacement: {
-                match: /(?<=,(\i)=\i\.\i\.canUseCustomCallSounds\(\i\);)(?=return\(0,\i\.jsxs\)\(\i\.A,\{isShown:!0)/,
+                match: /(?<=,(\i)=\i\.\i\.canUseCustomCallSounds\(\i\);)(?=.{0,200}?return.{0,200}?\(0,\i\.jsxs\)\(\i\.A,\{isShown:!0)/,
                 replace: "if(!$1)return null;",
             },
         },
@@ -557,7 +557,7 @@ export default definePlugin({
             find: 'type:"Tiered Tenure Badge Details"',
             predicate: () => settings.store.profileUpsells,
             replacement: {
-                match: /(?<=function \i\(\i\)\{)(?=let\{analyticsLocations:\i,displayProfile:\i,location:\i\}=\i;)/,
+                match: /(?<=function(?: \i)?\(\i\)\{)(?=let\{analyticsLocations:\i,displayProfile:\i,location:\i\}=\i;)/,
                 replace: "if(!$self.hasSubscription())return;",
             },
         },
@@ -637,10 +637,10 @@ export default definePlugin({
         {
             find: "#{intl::PREMIUM_UPSELL_PROFILE_AVATAR_DECO_INLINE_UPSELL}",
             predicate: () => settings.store.profileUpsells,
-            replacement: { match: /return null==(\i)\?null:(?=\(0,\i\.jsxs\)\("div")/, replace: "return null;" },
+            replacement: { match: /if\(null==\i\)return null;(?=function \i\(\i\)\{return\(0,\i\.jsxs\)\("div")/, replace: "return null;" },
         },
         {
-            find: "DISPLAY_NAME_STYLES_NITRO_CLICKED)",
+            find: "DISPLAY_NAME_STYLES_NITRO_CLICKED,{",
             predicate: () => settings.store.profileUpsells,
             replacement: { match: /(?<=\{"data-migration-pending":!0,className:\i\.\i,children:\i\|\|\i\?\i:)\i(?=\}\))/, replace: "null" },
         },
@@ -666,7 +666,7 @@ export default definePlugin({
             find: '"ReverseTrialUpsellModal"',
             predicate: () => settings.store.nitroPopups,
             replacement: {
-                match: /(?<=function \i\(\i,\i,\i\)\{)(?=if\(\(0,\i\.hasAnyModalOpen\)\(\)\)return;let\{isDismissed:\i\}=\(0,\i\.u\$\)\(\i,\i\);)/,
+                match: /(?<=function \i\(\i,\i,\i\)\{)(?=if\(\(0,\i\.\i\)\(\)\)return;let\{isDismissed:\i\}=\(0,\i\.\i\)\(\i,\i\);)/,
                 replace: "return;",
             },
         },
@@ -677,7 +677,7 @@ export default definePlugin({
             predicate: () => settings.store.nitroPopups,
             replacement: [
                 { match: /(?<=let \i=)(?=!\i\.\i\.canStreamQuality\(\i\.\i\.StreamQuality\.HIGH,\i\))/, replace: "!1&&" },
-                { match: /(?<=\i=\i=>\{let\{analyticsLocation:\i,onClose:\i\}=\i;)(?=\(0,\i\.openModalLazy\))/, replace: "return;" },
+                { match: /(?<=\i=\i=>\{let\{analyticsLocation:\i,onClose:\i\}=\i;)(?=\(0,\i\.\i\)\(async\(\)=>)/, replace: "return;" },
             ],
         },
         {
@@ -711,14 +711,14 @@ export default definePlugin({
         },
         // P40: scheduled messages: the inbox bar, and the limit roadblock (the plain alert stays)
         {
-            find: '"ScheduledMessageInboxTab"',
+            find: ".SCHEDULED_MESSAGES_LIST_UPSELL}",
             predicate: () => settings.store.nitroPopups,
             replacement: { match: /\i(?=\?\(0,\i\.jsx\)\("div",\{className:\i\.\i,children:\(0,\i\.jsx\)\(\i,\{isAtLimit:\i\}\)\}\):null)/, replace: "!1" },
         },
         {
-            find: '"ScheduledMessagesCreateRoadblock"',
+            find: ".SCHEDULED_MESSAGES_ROADBLOCK]",
             predicate: () => settings.store.nitroPopups,
-            replacement: { match: /(?<=\("ScheduledMessagesCreateRoadblock"\);)\i(?=\?\(0,\i\.openModalLazy\))/, replace: "!1" },
+            replacement: { match: /(?<=isUpgradable:\i\}=\(0,\i\.\i\)\(\);)\i(?=\?\(0,\i\.\i\)\(async)/, replace: "!1" },
         },
         // P41: server cap: the bar in the invite modal, the "join more servers" modal, and "Add a
         // Server", which opens the normal modal at the cap
@@ -734,7 +734,7 @@ export default definePlugin({
             find: '"nitro-guild-cap-upsell"',
             predicate: () => settings.store.nitroPopups,
             replacement: {
-                match: /(?<=function \i\((\i)\)\{)(?=let\{onCloseCallback:\i,analyticsLocations:\i,\.\.\.\i\}=\1;\(0,\i\.openModalLazy\))/,
+                match: /(?<=function(?: \i)?\((\i)\)\{)(?=let\{onCloseCallback:\i,analyticsLocations:\i,\.\.\.\i\}=\1;\(0,\i\.\i\)\(async)/,
                 replace: "return $self.showGuildCapAlert($1.onCloseCallback);",
             },
         },
@@ -807,7 +807,7 @@ export default definePlugin({
         {
             find: ".BILLING_SETTINGS_BANNER,component_id:",
             predicate: () => settings.store.nitroPopups,
-            replacement: { match: /(?<=function \i\(\i\)\{)(?=let\{component:\i,endDate:\i\}=\i)/, replace: "return null;" },
+            replacement: { match: /(?<=function(?: \i)?\(\i\)\{)(?=let\{component:\i,endDate:\i\}=\i)/, replace: "return null;" },
         },
         {
             find: ".XBOX_CONNECTED_ACCOUNTS_BANNER)",
@@ -827,7 +827,7 @@ export default definePlugin({
             find: 'surface:"storefront_banner"',
             predicate: () => settings.store.nitroPopups,
             replacement: {
-                match: /,\(0,\i\.jsx\)\(\i\.\$,\{variant:"expressive",size:"sm",icon:\i\.t,text:\i\.intl\.string\(\i\.t#{intl::PREMIUM_UPSELL_GET_NITRO}\),onClick:\i\}\)/,
+                match: /,\(0,\i\.jsx\)\(\i\.\$,\{variant:"expressive",size:"sm",icon:\i\.\i,text:\i\.intl\.string\(\i\.t#{intl::PREMIUM_UPSELL_GET_NITRO}\),onClick:\i\}\)/,
                 replace: "",
             },
         },
@@ -908,7 +908,7 @@ export default definePlugin({
             find: "#{intl::OUTBOUND_PROMO_UPSELL_EXPERIMENT_GIFTS_DESCRIPTION}",
             predicate: () => settings.store.giftPromotions,
             replacement: {
-                match: /(?<=\i=)!1===\i&&\i(?=\?\(0,\i\.jsxs\)\("div",\{className:\i\.\i,children:\[\(0,\i\.jsx\)\(\i\.t,\{size:"md",color:\i\.\i\.colors\.REDESIGN_BUTTON_PREMIUM_PRIMARY_PURPLE_FOR_GRADIENT_2)/,
+                match: /(?<=\i=)!1===\i&&\i(?=\?\(0,\i\.jsxs\)\("div",\{className:\i\.\i,children:\[\(0,\i\.jsx\)\(\i\.\i,\{size:"md",color:\i\.\i\.colors\.REDESIGN_BUTTON_PREMIUM_PRIMARY_PURPLE_FOR_GRADIENT_2)/,
                 replace: "!1",
             },
         },

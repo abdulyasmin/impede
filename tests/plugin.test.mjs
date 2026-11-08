@@ -141,7 +141,7 @@ test("the notice-store patches skip promotions without hiding payment warnings",
     const storePatch = plugin.patches.find(patch => patch.find === 'displayName="NoticeStore"');
     const noticePatch = plugin.patches.find(patch => patch.find === ".APP_NOTICE_VIEWED,");
 
-    const priorityLoop = "(function(order,notices){for(let type of order)if(null!=notices[type]&&notices[type].predicate())return notices[type]})";
+    const priorityLoop = '(function(order,notices){for(let[index,type]of order.entries())if(type!=="GLOBAL_BANNER_PREVIEW"){if(null==notices[type])continue;if(notices[type].predicate())return notices[type]}})';
     const selectNotice = runInNewContext(applyPatch(priorityLoop, storePatch), { $self: plugin });
     const promotion = { type: "PREMIUM_PROMO", predicate: () => true };
     const paymentWarning = { type: "PREMIUM_MISSING_PAYMENT", predicate: () => true };
@@ -218,7 +218,7 @@ test("server-cap invite gates retain a visible limit explanation", () => {
     const patch = harness.plugin.patches.find(patch => patch.find === '"nitro-guild-cap-upsell"');
     const identifier = "[A-Za-z_$][\\w$]*";
     const match = new RegExp(patch.replacement.match.source.replaceAll("\\i", identifier), patch.replacement.match.flags);
-    const openerFixture = "function openCap(e){let{onCloseCallback:c,analyticsLocations:a,...p}=e;(0,m.openModalLazy)(()=>null)}";
+    const openerFixture = "function(e){let{onCloseCallback:c,analyticsLocations:a,...p}=e;(0,m.mM)(async()=>null,{onCloseCallback:c})}";
     assert.match(openerFixture, match);
     const patchedOpener = openerFixture.replace(match, patch.replacement.replace);
     assert.notEqual(patchedOpener, openerFixture);
