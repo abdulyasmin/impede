@@ -7,7 +7,7 @@
 // Patches P1, P2, P5 and P8 are adapted from Equicord's Declutter, P10-P14 from Equicord's
 // Questify, and P9 from Vencord's CharacterCounter. Those projects are GPL-3.0-or-later;
 // AGPL-3.0 section 13 permits the combination, and the adapted parts stay under the GPL.
-// Every patch was checked against Discord stable build 667580 (2026-11-08).
+// Every patch was checked against Discord stable build 676376 (2026-11-18).
 
 import { findGroupChildrenByChildId } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
@@ -334,7 +334,7 @@ export default definePlugin({
             predicate: () => settings.store.blockQuestFetch,
             replacement: [
                 { match: /(?<=if\(\i\.\i\.isFetchingCurrentQuests)/, replace: "||true" },
-                { match: /(?=let \i=Date\.now\(\),\i=\i\.recordQuestRequestAttempt.{0,50}QUESTS_FETCH_QUEST_TO_DELIVER_BEGIN)/, replace: "return;" },
+                { match: /(?=let (?:\i=[^,;]{0,80},)?\i=Date\.now\(\),\i=\i\.recordQuestRequestAttempt.{0,50}QUESTS_FETCH_QUEST_TO_DELIVER_BEGIN)/, replace: "return;" },
             ],
         },
 
@@ -376,7 +376,7 @@ export default definePlugin({
             find: '?"free_trial":',
             predicate: () => settings.store.subscribeButtons,
             replacement: {
-                match: /,(\{text:\i,variant:"expressive",size:"md",onClick:async \i=>\{await \i\(\),\i\(\i\)\},icon:\i\.\i\})(?=\])/,
+                match: /,(\{text:\i,variant:"expressive",size:"md",onClick:async \i=>\{(?:null==\i&&)?await \i\(\),\i\(\i\)\},icon:\i\.\i\})(?=\])/,
                 replace: ",...($self.hasSubscription()?[$1]:[])",
             },
         },
@@ -542,10 +542,12 @@ export default definePlugin({
         {
             find: 'id:"shop-this-look"',
             predicate: () => settings.store.profileUpsells,
-            replacement: [
-                { match: /(?<=if\()(?=[^)]+\)return null;let \i=[^;]+;return\(0,\i\.jsxs\)\(\i\.\i,\{id:"shop-this-look")/, replace: "!0||" },
-                { match: /(?<=return )(?=(?:\i&&)*\i\?\(0,\i\.jsx\)\(\i\.\i,\{id:"referral-profile-share-nitro")/, replace: "!1&&" },
-            ],
+            replacement: { match: /(?<=return )(?=\i\?\(0,\i\.jsx\)\(\i\.\i,\{id:"shop-this-look")/, replace: "!1&&" },
+        },
+        {
+            find: 'id:"referral-profile-share-nitro"',
+            predicate: () => settings.store.profileUpsells,
+            replacement: { match: /(?<=return )(?=(?:\i&&)*\i\?\(0,\i\.jsx\)\(\i\.\i,\{id:"referral-profile-share-nitro")/, replace: "!1&&" },
         },
         // P30: badges: "Reorder badges with Nitro", the Nitro tenure modal, and badge-directory CTAs
         {
@@ -805,7 +807,7 @@ export default definePlugin({
             ],
         },
         {
-            find: ".BILLING_SETTINGS_BANNER,component_id:",
+            find: ".BILLING_SETTINGS_BANNER)?",
             predicate: () => settings.store.nitroPopups,
             replacement: { match: /(?<=function(?: \i)?\(\i\)\{)(?=let\{component:\i,endDate:\i\}=\i)/, replace: "return null;" },
         },
@@ -851,7 +853,8 @@ export default definePlugin({
         // P47: Orbs and Quests: the "Unlock 1.2x" pills, the Orb wallet card and badge, the
         // balance popout line, and Nitro in quest rewards. Subscribers keep their pills and badges.
         {
-            find: "QUEST_HOME_TILE_V2_FOOTER,analyticsCtxQuestContent",
+            // The Quest Home tile's pill, a component of its own since build 676376
+            find: /orbMultiplierEligibility:\i\}=\i,\i=\(0,\i\.\i\)\(\i\),\i=\(0,\i\.\i\)\(\i\);if\(null==\i\)return null;let \i=\i\?\i\.intl\.formatToPlainString\(\i\.t#{intl::VIRTUAL_CURRENCY_BONUS_ORBS_MULTIPLIER}/,
             predicate: () => settings.store.nitroPopups,
             replacement: {
                 match: /(?<=(\i)=\(0,\i\.\i\)\(\i\);if\(null==\i)(?=\)return null;let \i=\1\?\i\.intl\.formatToPlainString\(\i\.t#{intl::VIRTUAL_CURRENCY_BONUS_ORBS_MULTIPLIER})/,

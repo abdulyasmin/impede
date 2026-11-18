@@ -203,7 +203,7 @@ test("the server context-menu patch keeps unrelated actions", () => {
 test("the roadblock patch preserves subscriber actions", () => {
     const harness = loadPlugin();
     const patch = harness.plugin.patches.find(patch => patch.find === '?"free_trial":');
-    const fixture = '[{text:"close"},{text:a,variant:"expressive",size:"md",onClick:async e=>{await c(),d(e)},icon:i.x}]';
+    const fixture = '[{text:"close"},{text:a,variant:"expressive",size:"md",onClick:async e=>{null==t&&await c(),d(e)},icon:i.x}]';
     const patched = applyPatch(fixture, patch);
     const render = () => runInNewContext(patched, { $self: harness.plugin, a: "Nitro", i: { x: "icon" } });
     assert.equal(render().length, 2);
@@ -291,7 +291,7 @@ test("subscribeButtons controls activation of all three patches", () => {
         },
         {
             patch: harness.plugin.patches.find(patch => patch.find === '?"free_trial":'),
-            source: '[{text:"close"},{text:a,variant:"expressive",size:"md",onClick:async e=>{await c(),d(e)},icon:i.x}]',
+            source: '[{text:"close"},{text:a,variant:"expressive",size:"md",onClick:async e=>{null==t&&await c(),d(e)},icon:i.x}]',
             assertRemoved: source => assert.equal(
                 runInNewContext(source, { $self: harness.plugin, a: "Nitro", i: { x: "icon" } }).length,
                 1,
