@@ -149,10 +149,9 @@ button:has(> [class*="premiumSubscribeButton_"]) {
 }
 
 /* Emoji, sticker and sound popouts and pickers: Get Nitro buttons, the Super Reaction tooltip
-   text, the locked-sticker card, the entrance-sound card and the Soundmoji Nitro strip */
+   text, the entrance-sound card and the Soundmoji Nitro strip */
 :is([class*="emojiSection_"], [class*="otherEmojisContainer_"]) [class*="ctaButton_"]:has(svg),
 [class*="burstReactionTooltipPrompt_"]:has([aria-label="super reaction tooltip upsell"]),
-[class*="upsellWrapper_"],
 [class*="upsellOuter_"],
 [class*="infoNitroContainer_"] {
     display: none !important;

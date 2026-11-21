@@ -7,7 +7,7 @@
 // Patches P1, P2, P5 and P8 are adapted from Equicord's Declutter, P10-P14 from Equicord's
 // Questify, and P9 from Vencord's CharacterCounter. Those projects are GPL-3.0-or-later;
 // AGPL-3.0 section 13 permits the combination, and the adapted parts stay under the GPL.
-// Every patch was checked against Discord stable build 676376 (2026-11-18).
+// Every patch was checked against Discord stable build 678976 (2026-11-21).
 
 import { findGroupChildrenByChildId } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
@@ -94,7 +94,6 @@ const HIDE_SELECTORS: Partial<Record<SettingKey, string[]>> = {
         '[class*="upsellContainerInline_"]',
         ':is([class*="emojiSection_"], [class*="otherEmojisContainer_"]) [class*="ctaButton_"]:has(svg)',
         '[class*="burstReactionTooltipPrompt_"]:has([aria-label="super reaction tooltip upsell"])',
-        '[class*="upsellWrapper_"]',
         '[class*="upsellOuter_"]',
         '[class*="infoNitroContainer_"]',
     ],
@@ -444,11 +443,6 @@ export default definePlugin({
         {
             find: '"stickers-available-with-nitro-header"',
             replacement: [
-                {
-                    match: /(?<=function \i\(\i,\i,\i,(\i)\)\{return \i\.useMemo\(\(\)=>)\1(?=\?\i\.flatMap\(\i=>\{let \i=function)/,
-                    replace: "($1||!$self.hasSubscription())",
-                    predicate: () => settings.store.lockedEmoji,
-                },
                 { match: /return null!=(\i)\?\[\1\]:\[\]/, replace: "return null==$1||$1.isNitroLocked?[]:[$1]", predicate: () => settings.store.lockedEmoji },
                 {
                     match: /(?<=\i===\i\.\i\.SENDABLE\?\i\.push\(\i\):)\i===\i\.\i\.SENDABLE_WITH_PREMIUM&&/,
@@ -456,12 +450,12 @@ export default definePlugin({
                     predicate: () => settings.store.lockedEmoji,
                 },
                 {
-                    match: /\i(?=&&\(\i\?\(0,\i\.jsx\)\(\i,\{onUpsellClicked:\i\}\):\(0,\i\.jsx\)\(\i,\{onLearnMore:\i\}\)\))/,
+                    match: /\i(?=&&\(0,\i\.jsx\)\(\i,\{onUpsellClicked:\i\}\))/,
                     replace: "!1",
                     predicate: () => settings.store.expressionUpsells,
                 },
                 {
-                    match: /(?<=function \i\(\i\)\{let\{className:\i,onClose:\i\}=\i;)(?=\(0,\i\.\i\)\(\);let\{analyticsLocations:\i\}=\(0,\i\.\i\)\(\i\.\i\.EMPTY_STATE\))/,
+                    match: /(?<=function \i\(\i\)\{let\{className:\i\}=\i;)(?=\(0,\i\.\i\)\(\);let\{analyticsLocations:\i\}=\(0,\i\.\i\)\(\i\.\i\.EMPTY_STATE\))/,
                     replace: "return null;",
                     predicate: () => settings.store.expressionUpsells,
                 },
