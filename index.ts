@@ -7,7 +7,7 @@
 // Patches P1, P2, P5 and P8 are adapted from Equicord's Declutter, P10-P14 from Equicord's
 // Questify, and P9 from Vencord's CharacterCounter. Those projects are GPL-3.0-or-later;
 // AGPL-3.0 section 13 permits the combination, and the adapted parts stay under the GPL.
-// Every patch was checked against Discord stable build 678976 (2026-11-21).
+// Every patch was checked against Discord stable build 681034 (2026-11-26).
 
 import { findGroupChildrenByChildId } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
@@ -745,7 +745,7 @@ export default definePlugin({
             find: "renderNitroUpsellBannerOverlay(){",
             predicate: () => settings.store.nitroPopups,
             replacement: [
-                { match: /(?<=\(0,\i\.kn\)\()(?=\i&&!\i\?\[\i\.\i\.NITRO_GDM_CAP_COACHMARK\])/, replace: "!1&&" },
+                { match: /(?<=\(0,\i\.\i\)\()(?=\i&&"entitled"===\i\?\[\i\.\i\.NITRO_GDM_CAP_COACHMARK\])/, replace: "!1&&" },
                 { match: /(?<=renderNitroUpsellBannerOverlay\(\)\{)/, replace: "return null;" },
                 { match: /(?<=renderNitroCapFullState\(\)\{let\{transitionState:\i,onClose:\i,nitroAudience:\i\}=this\.props;if\()/, replace: "!1&&" },
             ],
