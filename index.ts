@@ -7,7 +7,7 @@
 // Patches P1, P2, P5 and P8 are adapted from Equicord's Declutter, P10-P14 from Equicord's
 // Questify, and P9 from Vencord's CharacterCounter. Those projects are GPL-3.0-or-later;
 // AGPL-3.0 section 13 permits the combination, and the adapted parts stay under the GPL.
-// Every patch was checked against Discord stable build 681034 (2026-11-26).
+// Every patch was checked against Discord stable build 681625 (2026-11-27).
 
 import { findGroupChildrenByChildId } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
@@ -302,8 +302,11 @@ export default definePlugin({
         {
             find: "GLOBAL_DISCOVERY_SIDEBAR},",
             predicate: () => settings.store.discoverQuests,
-            // Discord drops the tab itself when an experiment is on; force that branch.
-            replacement: { match: /location:"GlobalDiscoverySidebar"\}\)\.enabled(?=,.{0,80}?\.filter\(\i=>\(\i!==\i\.GlobalDiscoveryTab\.QUESTS\|\|!\i\))/, replace: "$&||!0" },
+            // The sidebar filters its tab list (only Games, behind an experiment); drop Quests there too.
+            replacement: {
+                match: /(?<=\("GlobalDiscoverySidebar"\),\i=\i\.\i\.filter\()(\i)=>(\1!==(\i\.GlobalDiscoveryTab)\.GAMES\|\|\i)(?=\))/,
+                replace: "$1=>$1!==$3.QUESTS&&($2)",
+            },
         },
         // P11: Active Now quest promo
         {
@@ -417,14 +420,21 @@ export default definePlugin({
                 { match: /(?<=let \i=!\i&&!\i&&\i)&&\i(?=;return\()/, replace: "" },
             ],
         },
-        // P19: Super Reactions: the launch coachmark, and the picker toggle unless you have Nitro
+        // P19: Super Reactions: the launch coachmark, and the picker toggle unless you have Nitro.
+        // Both are their own components, which every emoji picker renders; patch them, not the pickers.
         {
             find: "#{intl::SUPER_REACTIONS_LAUNCH_COACHMARK_DESCRIPTION_UNLIMITED_V2}",
             predicate: () => settings.store.expressionUpsells,
-            replacement: [
-                { match: /(?<=\.REACTION\?\(0,\i\.jsx\)\(\i,\{targetElementRef:\i,shouldShow:)/, replace: "!1&&" },
-                { match: /(?<=\i===\i\.\i\.REACTION)(?=\?\(0,\i\.jsx\)\(\i,\{checked:\i,onClick:\i,buttonRef:\i\}\))/, replace: "&&$self.hasSubscription()" },
-            ],
+            replacement: { match: /(?<=\{targetElementRef:\i,shouldShow:)(?=\i,onRequestClose:)/, replace: "!1&&" },
+        },
+        {
+            find: "SUPER_REACTION_TOGGLE_EDUCATION_DESKTOP]",
+            predicate: () => settings.store.expressionUpsells,
+            // After the hooks, so their order does not depend on the subscription.
+            replacement: {
+                match: /return(?=\(0,\i\.jsx\)\(\i\.\i,\{position:"top",title:\i,body:\i,asset:\(0,\i\.jsx\)\(\i\.NitroWheelIcon,)/,
+                replace: "return !$self.hasSubscription()?null:",
+            },
         },
         // P20: Super Reaction tooltip text, and the upsell modal its click opens
         {
